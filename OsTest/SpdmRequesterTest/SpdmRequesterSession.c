@@ -12,8 +12,8 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 extern VOID          *mSpdmContext;
 
 typedef struct {
-  SPDM_DATA_TYPE  DataType;
-  CHAR8           *String;
+  SPDM_DEBUG_DATA_TYPE  DataType;
+  CHAR8                 *String;
 } DATA_TYPE_STRING;
 
 DATA_TYPE_STRING  mDataTypeString[] = {
@@ -52,7 +52,7 @@ SPDM_VENDOR_DEFINED_REQUEST_MINE  mVendorDefinedRequest = {
 
 RETURN_STATUS
 DoAppSessionViaSpdm (
-  IN UINT8                           SessionId
+  IN UINT32                          SessionId
   )
 {
   VOID                               *SpdmContext;
@@ -93,27 +93,30 @@ DoSessionViaSpdm (
   UINTN                            DataSize;
   UINT8                            Data[MAX_DHE_KEY_SIZE];
   UINTN                            Index;
-  UINT8                            SessionId;
-  UINT8                            SessionId2;
+  UINT32                           SessionId;
+  UINT32                           SessionId2;
   SPDM_DATA_PARAMETER              Parameter;
   UINT8                            HeartbeatPeriod;
   UINT8                            MeasurementHash[MAX_HASH_SIZE];
 
   SpdmContext = mSpdmContext;
 
-#if USE_PSK
   Status = SpdmSetData (SpdmContext, SpdmDataPsk, NULL, "TestPskData", sizeof("TestPskData"));
   if (RETURN_ERROR(Status)) {
     printf ("SpdmSetData - %x\n", (UINT32)Status);
     return Status;
   }
-#endif
+  Status = SpdmSetData (SpdmContext, SpdmDataPskHint, NULL, "TestPskHint", sizeof("TestPskHint"));
+  if (RETURN_ERROR(Status)) {
+    printf ("SpdmSetData - %x\n", (UINT32)Status);
+    return Status;
+  }
 
   HeartbeatPeriod = 0;
   ZeroMem(MeasurementHash, sizeof(MeasurementHash));
   Status = SpdmStartSession (
              SpdmContext,
-             USE_PSK,
+             FALSE, // KeyExchange
              SPDM_CHALLENGE_REQUEST_TCB_COMPONENT_MEASUREMENT_HASH,
              0,
              &HeartbeatPeriod,
@@ -129,7 +132,7 @@ DoSessionViaSpdm (
   ZeroMem(MeasurementHash, sizeof(MeasurementHash));
   Status = SpdmStartSession (
              SpdmContext,
-             USE_PSK,
+             TRUE, // PSK
              SPDM_CHALLENGE_REQUEST_TCB_COMPONENT_MEASUREMENT_HASH,
              0,
              &HeartbeatPeriod,
@@ -143,11 +146,11 @@ DoSessionViaSpdm (
 
   ZeroMem (&Parameter, sizeof(Parameter));
   Parameter.Location = SpdmDataLocationSession;
-  Parameter.AdditionalData[0] = SessionId;
+  *(UINT32 *)Parameter.AdditionalData = SessionId;
   for (Index = 0; Index < ARRAY_SIZE(mDataTypeString); Index++) {
     DataSize = sizeof(Data);
     ZeroMem (Data, sizeof(Data));
-    Status = SpdmGetData (SpdmContext, mDataTypeString[Index].DataType, &Parameter, Data, &DataSize);
+    Status = SpdmGetData (SpdmContext, (SPDM_DATA_TYPE)mDataTypeString[Index].DataType, &Parameter, Data, &DataSize);
     if (!RETURN_ERROR(Status)) {
       printf ("%s (%d) - ", mDataTypeString[Index].String, (UINT32)DataSize);
       DumpData (Data, DataSize);

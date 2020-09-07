@@ -13,7 +13,7 @@ RETURN_STATUS
 EFIAPI
 SpdmGetResponseEndSession (
   IN     VOID                 *Context,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     UINTN                RequestSize,
   IN     VOID                 *Request,
   IN OUT UINTN                *ResponseSize,
@@ -21,6 +21,11 @@ SpdmGetResponseEndSession (
   )
 {
   SPDM_END_SESSION_RESPONSE     *SpdmResponse;
+
+  if (RequestSize != sizeof(SPDM_END_SESSION_REQUEST)) {
+    SpdmGenerateErrorResponse (Context, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
 
   ASSERT (*ResponseSize >= sizeof(SPDM_END_SESSION_RESPONSE));
   *ResponseSize = sizeof(SPDM_END_SESSION_RESPONSE);

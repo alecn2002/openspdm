@@ -65,13 +65,15 @@ SpdmGetResponsePskExchange (
   SPDM_PSK_EXCHANGE_RESPONSE    *SpdmResponse;
   BOOLEAN                       Result;
   UINT8                         SlotNum;
-  UINT8                         SessionId;
+  UINT32                        SessionId;
   UINT32                        HashSize;
   UINT32                        HmacSize;
   UINT8                         *Ptr;
   SPDM_SESSION_INFO             *SessionInfo;
   UINTN                         TotalSize;
   SPDM_DEVICE_CONTEXT           *SpdmContext;
+  UINT16                        ReqSessionId;
+  UINT16                        RspSessionId;
 
   SpdmContext = Context;
 
@@ -86,9 +88,26 @@ SpdmGetResponsePskExchange (
   HashSize = GetSpdmHashSize (SpdmContext);
   HmacSize = GetSpdmHashSize (SpdmContext);
 
+  if (RequestSize < sizeof(SPDM_PSK_EXCHANGE_REQUEST)) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
+  if (RequestSize < sizeof(SPDM_PSK_EXCHANGE_REQUEST) +
+                    SpdmRequest->PSKHintLength +
+                    SpdmRequest->RequesterContextLength +
+                    SpdmRequest->OpaqueLength) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
+  RequestSize = sizeof(SPDM_PSK_EXCHANGE_REQUEST) +
+                SpdmRequest->PSKHintLength +
+                SpdmRequest->RequesterContextLength +
+                SpdmRequest->OpaqueLength;
+
   TotalSize = sizeof(SPDM_PSK_EXCHANGE_RESPONSE) +
-              DEFAULT_CONTEXT_LENGTH +
               HashSize +
+              DEFAULT_CONTEXT_LENGTH +
+              SpdmContext->LocalContext.OpaquePskExchangeRspSize +
               HmacSize;
 
   ASSERT (*ResponseSize >= TotalSize);
@@ -100,18 +119,21 @@ SpdmGetResponsePskExchange (
   SpdmResponse->Header.RequestResponseCode = SPDM_PSK_EXCHANGE_RSP;
   SpdmResponse->Header.Param1 = 0;
 
-  SessionInfo = SpdmAllocateSessionId (SpdmContext, &SessionId);
+  ReqSessionId = SpdmRequest->ReqSessionID;
+  RspSessionId = SpdmAllocateRspSessionId (SpdmContext);
+  SessionId = (ReqSessionId << 16) | RspSessionId;
+  SessionInfo = SpdmAssignSessionId (SpdmContext, SessionId);
+  ASSERT(SessionInfo != NULL);
   SessionInfo->UsePsk = TRUE;
 
   AppendManagedBuffer (&SessionInfo->SessionTranscript.MessageK, Request, RequestSize);
 
-  SpdmResponse->Header.Param2 = SessionId;
+  SpdmResponse->RspSessionID = RspSessionId;
 
   SpdmResponse->ResponderContextLength = DEFAULT_CONTEXT_LENGTH;
+  SpdmResponse->OpaqueLength = (UINT16)SpdmContext->LocalContext.OpaquePskExchangeRspSize;
 
   Ptr = (VOID *)(SpdmResponse + 1);
-  GetRandomNumber (DEFAULT_CONTEXT_LENGTH, Ptr);
-  Ptr += DEFAULT_CONTEXT_LENGTH;
   
   Result = SpdmResponderCalculateMeasurementSummaryHash (SpdmContext, SpdmRequest->Header.Param1, Ptr);
   if (!Result) {
@@ -120,6 +142,12 @@ SpdmGetResponsePskExchange (
     return RETURN_SUCCESS;
   }
   Ptr += HashSize;
+  
+  GetRandomNumber (DEFAULT_CONTEXT_LENGTH, Ptr);
+  Ptr += DEFAULT_CONTEXT_LENGTH;
+
+  CopyMem (Ptr, SpdmContext->LocalContext.OpaquePskExchangeRsp, SpdmContext->LocalContext.OpaquePskExchangeRspSize);
+  Ptr += SpdmContext->LocalContext.OpaquePskExchangeRspSize;
 
   AppendManagedBuffer (&SessionInfo->SessionTranscript.MessageK, SpdmResponse, (UINTN)Ptr - (UINTN)SpdmResponse);
   SpdmGenerateSessionHandshakeKey (SpdmContext, SessionId, FALSE);

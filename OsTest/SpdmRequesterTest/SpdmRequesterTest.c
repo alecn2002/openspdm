@@ -12,7 +12,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #define IP_ADDRESS "127.0.0.1"
 
 #ifdef _MSC_VER
-struct  in_addr mIpAddress = {127, 0, 0, 1};
+struct  in_addr mIpAddress = {{{127, 0, 0, 1}}};
 #else
 struct  in_addr mIpAddress = {0x0100007F};
 #endif
@@ -29,9 +29,11 @@ BOOLEAN
 CommunicatePlatformData (
   IN SOCKET           Socket,
   IN UINT32           Command,
+  IN UINT32           Session,
   IN UINT8            *SendBuffer,
   IN UINTN            BytesToSend,
   OUT UINT32          *Response,
+  OUT UINT32          *RspSession,
   IN OUT UINTN        *BytesToReceive,
   OUT UINT8           *ReceiveBuffer
   );
@@ -105,6 +107,8 @@ PlatformClientRoutine (
   BOOLEAN Result;
   UINT32  Response;
   UINTN   ResponseSize;
+  UINT32  Session;
+  RETURN_STATUS  Status;
   
 #ifdef _MSC_VER
   WSADATA Ws;
@@ -125,9 +129,11 @@ PlatformClientRoutine (
   Result = CommunicatePlatformData (
              PlatformSocket,
              SOCKET_SPDM_COMMAND_TEST,
+             0,
              (UINT8 *)"Client Hello!",
              sizeof("Client Hello!"),
              &Response,
+             &Session,
              &ResponseSize,
              mReceiveBuffer
              );
@@ -137,21 +143,36 @@ PlatformClientRoutine (
 
   // Do test - begin
 
-  DoMeasurementViaSpdm ();
+  Status = DoAuthenticationViaSpdm ();
+  if (RETURN_ERROR(Status)) {
+    printf ("DoAuthenticationViaSpdm - %x\n", (UINT32)Status);
+    goto Done;
+  }
 
-  DoAuthenticationViaSpdm ();
+  Status = DoMeasurementViaSpdm ();
+  if (RETURN_ERROR(Status)) {
+    printf ("DoMeasurementViaSpdm - %x\n", (UINT32)Status);
+    goto Done;
+  }
 
-  DoSessionViaSpdm ();
+  Status = DoSessionViaSpdm ();
+  if (RETURN_ERROR(Status)) {
+    printf ("DoSessionViaSpdm - %x\n", (UINT32)Status);
+    goto Done;
+  }
 
   // Do test - end
 
+Done:
   ResponseSize = 0;
   Result = CommunicatePlatformData (
              PlatformSocket,
              SOCKET_SPDM_COMMAND_STOP,
+             0,
              NULL,
              0,
              &Response,
+             &Session,
              &ResponseSize,
              NULL
              );

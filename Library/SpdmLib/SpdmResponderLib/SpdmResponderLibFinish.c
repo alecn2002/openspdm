@@ -41,15 +41,15 @@ SpdmResponderVerifyFinishSignature (
   if ((SpdmContext->LocalContext.CertificateChain[SlotNum] == NULL) || (SpdmContext->LocalContext.CertificateChainSize[SlotNum] == 0)) {
     return FALSE;
   }
-  if ((SpdmContext->LocalContext.SpdmCertChainVarBuffer == NULL) || (SpdmContext->LocalContext.SpdmCertChainVarBufferSize == 0)) {
+  if (SpdmContext->ConnectionInfo.PeerCertChainBufferSize == 0) {
     return FALSE;
   }
   CertBuffer = (UINT8 *)SpdmContext->LocalContext.CertificateChain[SlotNum] + sizeof(SPDM_CERT_CHAIN) + HashSize;
   CertBufferSize = SpdmContext->LocalContext.CertificateChainSize[SlotNum] - (sizeof(SPDM_CERT_CHAIN) + HashSize);
   HashFunc (CertBuffer, CertBufferSize, CertBufferHash);
 
-  MutCertBuffer = (UINT8 *)SpdmContext->LocalContext.SpdmCertChainVarBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
-  MutCertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
+  MutCertBuffer = (UINT8 *)SpdmContext->ConnectionInfo.PeerCertChainBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
+  MutCertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
   HashFunc (MutCertBuffer, MutCertBufferSize, MutCertBufferHash);
 
   DEBUG((DEBUG_INFO, "MessageA Data :\n"));
@@ -78,9 +78,9 @@ SpdmResponderVerifyFinishSignature (
   InternalDumpData (HashData, HashSize);
   DEBUG((DEBUG_INFO, "\n"));
 
-  GetPublicKeyFromX509Func = GetSpdmAsymGetPublicKeyFromX509 (SpdmContext);
-  FreeFunc = GetSpdmAsymFree (SpdmContext);
-  VerifyFunc = GetSpdmAsymVerify (SpdmContext);
+  GetPublicKeyFromX509Func = GetSpdmReqAsymGetPublicKeyFromX509 (SpdmContext);
+  FreeFunc = GetSpdmReqAsymFree (SpdmContext);
+  VerifyFunc = GetSpdmReqAsymVerify (SpdmContext);
   Result = GetPublicKeyFromX509Func (MutCertBuffer, MutCertBufferSize, &Context);
   if (!Result) {
     return FALSE;
@@ -135,11 +135,11 @@ SpdmVerifyFinishHmac (
   HashFunc (CertBuffer, CertBufferSize, CertBufferHash);
 
   if (SessionInfo->MutAuthRequested) {
-    if ((SpdmContext->LocalContext.SpdmCertChainVarBuffer == NULL) || (SpdmContext->LocalContext.SpdmCertChainVarBufferSize == 0)) {
+    if (SpdmContext->ConnectionInfo.PeerCertChainBufferSize == 0) {
       return FALSE;
     }
-    MutCertBuffer = (UINT8 *)SpdmContext->LocalContext.SpdmCertChainVarBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
-    MutCertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
+    MutCertBuffer = (UINT8 *)SpdmContext->ConnectionInfo.PeerCertChainBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
+    MutCertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
     HashFunc (MutCertBuffer, MutCertBufferSize, MutCertBufferHash);
   }
 
@@ -186,7 +186,7 @@ RETURN_STATUS
 EFIAPI
 SpdmGetResponseFinish (
   IN     VOID                 *Context,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     UINTN                RequestSize,
   IN     VOID                 *Request,
   IN OUT UINTN                *ResponseSize,

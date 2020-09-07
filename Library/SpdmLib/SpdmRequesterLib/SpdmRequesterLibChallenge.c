@@ -36,9 +36,9 @@ SpdmRequesterVerifyCertificateChainHash (
   UINT8                                     *CertBuffer;
   UINTN                                     CertBufferSize;
 
-  CertBuffer = SpdmContext->LocalContext.SpdmCertChainVarBuffer;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize;
-  if ((CertBuffer == NULL) || (CertBufferSize == 0)) {
+  CertBuffer = SpdmContext->ConnectionInfo.PeerCertChainBuffer;
+  CertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize;
+  if (CertBufferSize == 0) {
     return FALSE;
   }
   
@@ -96,11 +96,11 @@ SpdmRequesterVerifyChallengeSignature (
   InternalDumpData (HashData, HashSize);
   DEBUG((DEBUG_INFO, "\n"));
   
-  if ((SpdmContext->LocalContext.SpdmCertChainVarBuffer == NULL) || (SpdmContext->LocalContext.SpdmCertChainVarBufferSize == 0)) {
+  if (SpdmContext->ConnectionInfo.PeerCertChainBufferSize == 0) {
     return FALSE;
   }
-  CertBuffer = (UINT8 *)SpdmContext->LocalContext.SpdmCertChainVarBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
+  CertBuffer = (UINT8 *)SpdmContext->ConnectionInfo.PeerCertChainBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
+  CertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
 
   GetPublicKeyFromX509Func = GetSpdmAsymGetPublicKeyFromX509 (SpdmContext);
   FreeFunc = GetSpdmAsymFree (SpdmContext);
@@ -156,14 +156,22 @@ SpdmChallenge (
   SPDM_DEVICE_CONTEXT                       *SpdmContext;
 
   SpdmContext = Context;
-  
+  if (((SpdmContext->SpdmCmdReceiveState & SPDM_NEGOTIATE_ALGORITHMS_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CERTIFICATE_RECEIVE_FLAG) == 0)) {
+    return RETURN_DEVICE_ERROR;
+  }
   if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CHAL_CAP) == 0) {
     return RETURN_DEVICE_ERROR;
   }
 
   SpdmContext->ErrorState = SPDM_STATUS_ERROR_DEVICE_NO_CAPABILITIES;
  
-  SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+  } else {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  }
   SpdmRequest.Header.RequestResponseCode = SPDM_CHALLENGE;
   SpdmRequest.Header.Param1 = SlotNum;
   SpdmRequest.Header.Param2 = MeasurementHashType;
@@ -280,6 +288,6 @@ SpdmChallenge (
   if (MeasurementHash != NULL) {
     CopyMem (MeasurementHash, MeasurementSummaryHash, HashSize);
   }
-
+  SpdmContext->SpdmCmdReceiveState |= SPDM_CHALLENGE_RECEIVE_FLAG;
   return RETURN_SUCCESS;
 }

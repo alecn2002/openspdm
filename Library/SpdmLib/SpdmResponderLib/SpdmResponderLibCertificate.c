@@ -34,6 +34,10 @@ SpdmGetResponseCertificate (
     SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
     return RETURN_SUCCESS;
   }
+  if ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_UNEXPECTED_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
   SpdmRequestSize = RequestSize;
   //
   // Cache
@@ -76,7 +80,11 @@ SpdmGetResponseCertificate (
   ZeroMem (Response, *ResponseSize);
   SpdmResponse = Response;
 
-  SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+  } else {
+    SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  }
   SpdmResponse->Header.RequestResponseCode = SPDM_CERTIFICATE;
   SpdmResponse->Header.Param1 = SlotNum;
   SpdmResponse->Header.Param2 = 0;
@@ -87,6 +95,7 @@ SpdmGetResponseCertificate (
   // Cache
   //
   AppendManagedBuffer (&SpdmContext->Transcript.MessageB, SpdmResponse, *ResponseSize);
+  SpdmContext->SpdmCmdReceiveState |= SPDM_GET_CERTIFICATE_RECEIVE_FLAG;
 
   return RETURN_SUCCESS;
 }

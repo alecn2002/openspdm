@@ -31,14 +31,6 @@ SOURCE_DIR = $(WORKSPACE)\OsTest\$(MODULE_NAME)
 #
 # Build Macro
 #
-SOURCE_FILES =  \
-	$(SOURCE_DIR)\SpdmResponder.c \
-	$(SOURCE_DIR)\SpdmResponderMeasurement.c \
-	$(SOURCE_DIR)\SpdmResponderTest.c \
-	$(SOURCE_DIR)\..\SpdmTestCommon\SpdmTestCommand.c \
-	$(SOURCE_DIR)\..\SpdmTestCommon\SpdmTestKey.c \
-	$(SOURCE_DIR)\..\SpdmTestCommon\SpdmTestSupport.c \
-
 
 OBJECT_FILES =  \
     $(OUTPUT_DIR)\SpdmResponder.obj \
@@ -57,15 +49,28 @@ STATIC_LIBRARY_FILES =  \
     $(BIN_DIR)\OsStub\MemoryAllocationLib\MemoryAllocationLib.lib \
     $(BIN_DIR)\Library\SpdmLib\SpdmCommonLib\SpdmCommonLib.lib \
     $(BIN_DIR)\Library\SpdmLib\SpdmResponderLib\SpdmResponderLib.lib \
+    $(BIN_DIR)\Library\SpdmLib\SpdmEncodingLib\SpdmEncodingLib.lib \
     $(OUTPUT_DIR)\$(MODULE_NAME).lib \
 
 
+STATIC_LIBRARY_OBJECT_FILES =  \
+    $(OBJECT_FILES) \
+    $(BIN_DIR)\OsStub\BaseMemoryLib\*.obj \
+    $(BIN_DIR)\OsStub\DebugLib\*.obj \
+    $(BIN_DIR)\OsStub\BaseCryptLib$(CRYPTO)\*.obj \
+    $(BIN_DIR)\OsStub\$(CRYPTO)Lib\*.obj \
+    $(BIN_DIR)\OsStub\MemoryAllocationLib\*.obj \
+    $(BIN_DIR)\Library\SpdmLib\SpdmCommonLib\*.obj \
+    $(BIN_DIR)\Library\SpdmLib\SpdmResponderLib\*.obj \
+    $(BIN_DIR)\Library\SpdmLib\SpdmEncodingLib\*.obj \
+
+
 INC =  \
-    /I$(SOURCE_DIR) \
-    /I$(WORKSPACE)\OsTest\SpdmTestCommon \
-    /I$(WORKSPACE)\Include \
-    /I$(WORKSPACE)\Include\Hal \
-    /I$(WORKSPACE)\Include\Hal\$(ARCH)
+    -I$(SOURCE_DIR) \
+    -I$(WORKSPACE)\OsTest\SpdmTestCommon \
+    -I$(WORKSPACE)\Include \
+    -I$(WORKSPACE)\Include\Hal \
+    -I$(WORKSPACE)\Include\Hal\$(ARCH)
 
 #
 # Overridable Target Macro Definitions
@@ -95,25 +100,41 @@ init:
 # GenLibsTarget
 #
 gen_libs:
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\BaseMemoryLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\DebugLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\BaseCryptLib$(CRYPTO)\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\$(CRYPTO)Lib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\MemoryAllocationLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\Library\SpdmLib\SpdmCommonLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
-	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\Library\SpdmLib\SpdmResponderLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\BaseMemoryLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\DebugLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\BaseCryptLib$(CRYPTO)\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\$(CRYPTO)Lib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\OsStub\MemoryAllocationLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\Library\SpdmLib\SpdmCommonLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\Library\SpdmLib\SpdmResponderLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
+	@"$(MAKE)" $(MAKE_FLAGS) -f $(WORKSPACE)\Library\SpdmLib\SpdmEncodingLib\$(MAKEFILE) ARCH=$(ARCH) TARGET=$(TARGET) TOOLCHAIN=$(TOOLCHAIN) CRYPTO=$(CRYPTO)
 
 #
 # Individual Object Build Targets
 #
-$(OBJECT_FILES):  $(SOURCE_FILES)
-	"$(CC)" /Fo$(OUTPUT_DIR)\.\ $(CC_FLAGS) $(INC) $(SOURCE_FILES)
+$(OUTPUT_DIR)\SpdmResponder.obj : $(SOURCE_DIR)\SpdmResponder.c
+	$(CC) $(CC_FLAGS) $(CC_OBJ_FLAG)$@ $(INC) $(SOURCE_DIR)\SpdmResponder.c
+
+$(OUTPUT_DIR)\SpdmResponderMeasurement.obj : $(SOURCE_DIR)\SpdmResponderMeasurement.c
+	$(CC) $(CC_FLAGS) $(CC_OBJ_FLAG)$@ $(INC) $(SOURCE_DIR)\SpdmResponderMeasurement.c
+
+$(OUTPUT_DIR)\SpdmResponderTest.obj : $(SOURCE_DIR)\SpdmResponderTest.c
+	$(CC) $(CC_FLAGS) $(CC_OBJ_FLAG)$@ $(INC) $(SOURCE_DIR)\SpdmResponderTest.c
+
+$(OUTPUT_DIR)\SpdmTestCommand.obj : $(SOURCE_DIR)\../SpdmTestCommon/SpdmTestCommand.c
+	$(CC) $(CC_FLAGS) $(CC_OBJ_FLAG)$@ $(INC) $(SOURCE_DIR)\../SpdmTestCommon/SpdmTestCommand.c
+
+$(OUTPUT_DIR)\SpdmTestKey.obj : $(SOURCE_DIR)\../SpdmTestCommon/SpdmTestKey.c
+	$(CC) $(CC_FLAGS) $(CC_OBJ_FLAG)$@ $(INC) $(SOURCE_DIR)\../SpdmTestCommon/SpdmTestKey.c
+
+$(OUTPUT_DIR)\SpdmTestSupport.obj : $(SOURCE_DIR)\../SpdmTestCommon/SpdmTestSupport.c
+	$(CC) $(CC_FLAGS) $(CC_OBJ_FLAG)$@ $(INC) $(SOURCE_DIR)\../SpdmTestCommon/SpdmTestSupport.c
 
 $(OUTPUT_DIR)\$(MODULE_NAME).lib : $(OBJECT_FILES)
-	"$(SLINK)" $(SLINK_FLAGS) $(OBJECT_FILES) /OUT:$@
+	$(SLINK) $(SLINK_FLAGS) $(OBJECT_FILES) $(SLINK_OBJ_FLAG)$@
 
 $(OUTPUT_DIR)\$(MODULE_NAME) : $(STATIC_LIBRARY_FILES)
-	"$(DLINK)" $(DLINK_FLAGS) $(DLINK_SPATH) $(STATIC_LIBRARY_FILES)
+	$(DLINK) $(DLINK_FLAGS) $(DLINK_SPATH) $(DLINK_OBJECT_FILES)
 
 #
 # clean all intermediate files

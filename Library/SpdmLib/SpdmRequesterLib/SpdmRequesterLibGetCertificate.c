@@ -29,22 +29,46 @@ SpdmRequesterVerifyCertificateChain (
 {
   UINT8                                     *CertBuffer;
   UINTN                                     CertBufferSize;
-  
-  CertBuffer = SpdmContext->LocalContext.SpdmCertChainVarBuffer;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize;
-  if ((CertBuffer == NULL) || (CertBufferSize == 0)) {
+  UINTN                                     HashSize;
+  UINT8                                     *RootCertHash;
+  UINTN                                     RootCertHashSize;
+
+  if (CertificateChainSize > MAX_SPDM_MESSAGE_BUFFER_SIZE) {
+    DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL (buffer too large) !!!\n"));
     return FALSE;
   }
-  
-  if (CertBufferSize != CertificateChainSize) {
-    DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL !!!\n"));
-    return FALSE;
-  }
-  if (CompareMem (CertificateChain, CertBuffer, CertificateChainSize) != 0) {
-    DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL !!!\n"));
-    return FALSE;
+
+  RootCertHash = SpdmContext->LocalContext.PeerRootCertHashVarBuffer;
+  RootCertHashSize = SpdmContext->LocalContext.PeerRootCertHashVarBufferSize;
+  CertBuffer = SpdmContext->LocalContext.PeerCertChainVarBuffer;
+  CertBufferSize = SpdmContext->LocalContext.PeerCertChainVarBufferSize;
+
+  if ((RootCertHash != NULL) && (RootCertHashSize != 0)) {
+    HashSize = GetSpdmHashSize (SpdmContext);
+    ASSERT (RootCertHashSize == HashSize);
+    if (CertificateChainSize <= sizeof(SPDM_CERT_CHAIN) + HashSize) {
+      DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL (buffer too small) !!!\n"));
+      return FALSE;
+    }
+    if (CompareMem ((UINT8 *)CertificateChain + sizeof(SPDM_CERT_CHAIN), RootCertHash, HashSize) != 0) {
+      DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL (root hash mismatch) !!!\n"));
+      return FALSE;
+    }
+    // TBD verify the CertChain
+  } else if ((CertBuffer != NULL) && (CertBufferSize != 0)) {
+    if (CertBufferSize != CertificateChainSize) {
+      DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL !!!\n"));
+      return FALSE;
+    }
+    if (CompareMem (CertificateChain, CertBuffer, CertificateChainSize) != 0) {
+      DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - FAIL !!!\n"));
+      return FALSE;
+    }
   }
   DEBUG((DEBUG_INFO, "!!! VerifyCertificateChain - PASS !!!\n"));
+  SpdmContext->ConnectionInfo.PeerCertChainBufferSize = CertificateChainSize;
+  CopyMem (SpdmContext->ConnectionInfo.PeerCertChainBuffer, CertificateChain, CertificateChainSize);
+
   return TRUE;
 }
 
@@ -69,15 +93,21 @@ SpdmGetCertificate (
   SPDM_DEVICE_CONTEXT                       *SpdmContext;
 
   SpdmContext = Context;
-  
+  if ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0) {
+    return RETURN_DEVICE_ERROR;
+  }
   if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CERT_CAP) == 0) {
     return RETURN_DEVICE_ERROR;
   }
 
   SpdmContext->ErrorState = SPDM_STATUS_ERROR_DEVICE_NO_CAPABILITIES;
  
-  do {  
-    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  do {
+    if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+      SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+    } else {
+      SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+    }
     SpdmRequest.Header.RequestResponseCode = SPDM_GET_CERTIFICATE;
     SpdmRequest.Header.Param1 = SlotNum;
     SpdmRequest.Header.Param2 = 0;
@@ -163,7 +193,7 @@ SpdmGetCertificate (
         );
     }
   }
-  
+  SpdmContext->SpdmCmdReceiveState |= SPDM_GET_CERTIFICATE_RECEIVE_FLAG;
   Status = RETURN_SUCCESS;
 Done:
   return Status;

@@ -26,7 +26,7 @@ typedef
 RETURN_STATUS
 (EFIAPI *SPDM_GET_RESPONSE_SESSION_FUNC) (
   IN     VOID                 *SpdmContext,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     UINTN                RequestSize,
   IN     VOID                 *Request,
   IN OUT UINTN                *ResponseSize,
@@ -49,6 +49,12 @@ SpdmRegisterGetResponseSessionFunc (
 
 RETURN_STATUS
 EFIAPI
+SpdmResponderDispatchMessage (
+  IN     VOID                 *SpdmContext
+  );
+
+RETURN_STATUS
+EFIAPI
 SpdmReceiveSendData (
   IN     VOID                 *SpdmContext,
   IN     VOID                 *RequestBuffer,
@@ -61,7 +67,7 @@ RETURN_STATUS
 EFIAPI
 SpdmReceiveSendSessionData (
   IN     VOID                 *SpdmContext,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     VOID                 *RequestBuffer,
   IN     UINTN                RequestBufferSize,
      OUT VOID                 *ResponseBuffer,
@@ -74,6 +80,18 @@ SpdmGenerateErrorResponse (
   IN     VOID                 *SpdmContext,
   IN     UINT8                ErrorCode,
   IN     UINT8                ErrorData,
+  IN OUT UINTN                *ResponseSize,
+     OUT VOID                 *Response
+  );
+
+RETURN_STATUS
+EFIAPI
+SpdmGenerateExtendedErrorResponse (
+  IN     VOID                 *Context,
+  IN     UINT8                ErrorCode,
+  IN     UINT8                ErrorData,
+  IN     UINTN                ExtendedErrorDataSize,
+  IN     UINT8                *ExtendedErrorData,
   IN OUT UINTN                *ResponseSize,
      OUT VOID                 *Response
   );

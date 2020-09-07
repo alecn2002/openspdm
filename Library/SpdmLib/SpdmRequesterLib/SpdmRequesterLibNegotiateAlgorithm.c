@@ -21,9 +21,7 @@ typedef struct {
   UINT8                ExtAsymCount;
   UINT8                ExtHashCount;
   UINT16               Reserved3;
-  SPDM_NEGOTIATE_ALGORITHMS_COMMON_STRUCT_TABLE Dhe;
-  SPDM_NEGOTIATE_ALGORITHMS_COMMON_STRUCT_TABLE Aead;
-  SPDM_NEGOTIATE_ALGORITHMS_COMMON_STRUCT_TABLE KeySchedule;
+  SPDM_NEGOTIATE_ALGORITHMS_COMMON_STRUCT_TABLE StructTable[4];
 } SPDM_NEGOTIATE_ALGORITHMS_REQUEST_MINE;
 
 typedef struct {
@@ -48,8 +46,7 @@ typedef struct {
   The negotiated data can be get via GetData.
 */
 RETURN_STATUS
-EFIAPI
-SpdmNegotiateAlgorithms (
+TrySpdmNegotiateAlgorithms (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext
   )
 {
@@ -60,28 +57,41 @@ SpdmNegotiateAlgorithms (
   UINT32                                         AlgoSize;
   UINTN                                          Index;
   SPDM_NEGOTIATE_ALGORITHMS_COMMON_STRUCT_TABLE  *StructTable;
-  
+
+  if (((SpdmContext->SpdmCmdReceiveState & SPDM_GET_VERSION_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0)) {
+    return RETURN_DEVICE_ERROR;
+  }
   ZeroMem (&SpdmRequest, sizeof(SpdmRequest));
-  SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+    SpdmRequest.Length = sizeof(SpdmRequest);
+    SpdmRequest.Header.Param1 = 4; // Number of Algorithms Structure Tables
+  } else {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+    SpdmRequest.Length = sizeof(SpdmRequest) - sizeof(SpdmRequest.StructTable);
+    SpdmRequest.Header.Param1 = 0;
+  }
   SpdmRequest.Header.RequestResponseCode = SPDM_NEGOTIATE_ALGORITHMS;
-  SpdmRequest.Header.Param1 = 3; // Number of Algorithms Structure Tables
   SpdmRequest.Header.Param2 = 0;
-  SpdmRequest.Length = sizeof(SpdmRequest);
   SpdmRequest.MeasurementSpecification = SPDM_MEASUREMENT_BLOCK_HEADER_SPECIFICATION_DMTF;
   SpdmRequest.BaseAsymAlgo = SpdmContext->LocalContext.Algorithm.BaseAsymAlgo;
   SpdmRequest.BaseHashAlgo = SpdmContext->LocalContext.Algorithm.BaseHashAlgo;
   SpdmRequest.ExtAsymCount = 0;
   SpdmRequest.ExtHashCount = 0;
-  SpdmRequest.Dhe.AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_DHE;
-  SpdmRequest.Dhe.AlgCount = 0x20;
-  SpdmRequest.Dhe.AlgSupported = SpdmContext->LocalContext.Algorithm.DHENamedGroup;
-  SpdmRequest.Aead.AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_AEAD;
-  SpdmRequest.Aead.AlgCount = 0x20;
-  SpdmRequest.Aead.AlgSupported = SpdmContext->LocalContext.Algorithm.AEADCipherSuite;
-  SpdmRequest.KeySchedule.AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_KEY_SCHEDULE;
-  SpdmRequest.KeySchedule.AlgCount = 0x20;
-  SpdmRequest.KeySchedule.AlgSupported = SpdmContext->LocalContext.Algorithm.KeySchedule;
-  Status = SpdmSendRequest (SpdmContext, sizeof(SpdmRequest), &SpdmRequest);
+  SpdmRequest.StructTable[0].AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_DHE;
+  SpdmRequest.StructTable[0].AlgCount = 0x20;
+  SpdmRequest.StructTable[0].AlgSupported = SpdmContext->LocalContext.Algorithm.DHENamedGroup;
+  SpdmRequest.StructTable[1].AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_AEAD;
+  SpdmRequest.StructTable[1].AlgCount = 0x20;
+  SpdmRequest.StructTable[1].AlgSupported = SpdmContext->LocalContext.Algorithm.AEADCipherSuite;
+  SpdmRequest.StructTable[2].AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_REQ_BASE_ASYM_ALG;
+  SpdmRequest.StructTable[2].AlgCount = 0x20;
+  SpdmRequest.StructTable[2].AlgSupported = SpdmContext->LocalContext.Algorithm.ReqBaseAsymAlg;
+  SpdmRequest.StructTable[3].AlgType = SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_KEY_SCHEDULE;
+  SpdmRequest.StructTable[3].AlgCount = 0x20;
+  SpdmRequest.StructTable[3].AlgSupported = SpdmContext->LocalContext.Algorithm.KeySchedule;
+  Status = SpdmSendRequest (SpdmContext, SpdmRequest.Length, &SpdmRequest);
   if (RETURN_ERROR(Status)) {
     return RETURN_DEVICE_ERROR;
   }
@@ -89,7 +99,7 @@ SpdmNegotiateAlgorithms (
   //
   // Cache data
   //
-  AppendManagedBuffer (&SpdmContext->Transcript.MessageA, &SpdmRequest, sizeof(SpdmRequest));
+  AppendManagedBuffer (&SpdmContext->Transcript.MessageA, &SpdmRequest, SpdmRequest.Length);
 
   SpdmResponseSize = sizeof(SpdmResponse);
   ZeroMem (&SpdmResponse, sizeof(SpdmResponse));
@@ -97,13 +107,18 @@ SpdmNegotiateAlgorithms (
   if (RETURN_ERROR(Status)) {
     return RETURN_DEVICE_ERROR;
   }
+  if (SpdmResponse.Header.RequestResponseCode == SPDM_ERROR) {
+    Status = SpdmHandleErrorResponseMain(SpdmContext, &SpdmContext->Transcript.MessageA, SpdmRequest.Length, &SpdmResponseSize, &SpdmResponse, SPDM_NEGOTIATE_ALGORITHMS, SPDM_ALGORITHMS, sizeof(SPDM_ALGORITHMS_RESPONSE_MAX));
+    if (RETURN_ERROR(Status)) {
+      return Status;
+    }
+  } else if (SpdmResponse.Header.RequestResponseCode != SPDM_ALGORITHMS) {
+    return RETURN_DEVICE_ERROR;
+  }
   if (SpdmResponseSize < sizeof(SPDM_ALGORITHMS_RESPONSE)) {
     return RETURN_DEVICE_ERROR;
   }
   if (SpdmResponseSize > sizeof(SpdmResponse)) {
-    return RETURN_DEVICE_ERROR;
-  }
-  if (SpdmResponse.Header.RequestResponseCode != SPDM_ALGORITHMS) {
     return RETURN_DEVICE_ERROR;
   }
   if (SpdmResponseSize < sizeof(SPDM_ALGORITHMS_RESPONSE) + 
@@ -124,24 +139,6 @@ SpdmNegotiateAlgorithms (
   SpdmContext->ConnectionInfo.Algorithm.MeasurementHashAlgo = SpdmResponse.MeasurementHashAlgo;
   SpdmContext->ConnectionInfo.Algorithm.BaseAsymAlgo = SpdmResponse.BaseAsymSel;
   SpdmContext->ConnectionInfo.Algorithm.BaseHashAlgo = SpdmResponse.BaseHashSel;
-  StructTable = (VOID *)((UINTN)&SpdmResponse +
-                          sizeof(SPDM_ALGORITHMS_RESPONSE) +
-                          sizeof(UINT32) * SpdmResponse.ExtAsymSelCount +
-                          sizeof(UINT32) * SpdmResponse.ExtHashSelCount
-                          );
-  for (Index = 0; Index < SpdmResponse.Header.Param1; Index++) {
-    switch (StructTable[Index].AlgType) {
-    case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_DHE:
-      SpdmContext->ConnectionInfo.Algorithm.DHENamedGroup = StructTable[Index].AlgSupported;
-      break;
-    case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_AEAD:
-      SpdmContext->ConnectionInfo.Algorithm.AEADCipherSuite = StructTable[Index].AlgSupported;
-      break;
-    case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_KEY_SCHEDULE:
-      SpdmContext->ConnectionInfo.Algorithm.KeySchedule = StructTable[Index].AlgSupported;
-      break;
-    }
-  }
 
   AlgoSize = GetSpdmMeasurementHashSize (SpdmContext);
   if (AlgoSize == 0xFFFFFFFF) {
@@ -155,10 +152,64 @@ SpdmNegotiateAlgorithms (
   if (AlgoSize == 0xFFFFFFFF) {
     return RETURN_SECURITY_VIOLATION;
   }
-  AlgoSize = GetSpdmDHEKeySize (SpdmContext);
-  if (AlgoSize == 0xFFFFFFFF) {
-    return RETURN_SECURITY_VIOLATION;
-  }
 
+  if (SpdmResponse.Header.SPDMVersion >= SPDM_MESSAGE_VERSION_11) {
+    StructTable = (VOID *)((UINTN)&SpdmResponse +
+                            sizeof(SPDM_ALGORITHMS_RESPONSE) +
+                            sizeof(UINT32) * SpdmResponse.ExtAsymSelCount +
+                            sizeof(UINT32) * SpdmResponse.ExtHashSelCount
+                            );
+    for (Index = 0; Index < SpdmResponse.Header.Param1; Index++) {
+      switch (StructTable[Index].AlgType) {
+      case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_DHE:
+        SpdmContext->ConnectionInfo.Algorithm.DHENamedGroup = StructTable[Index].AlgSupported;
+        break;
+      case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_AEAD:
+        SpdmContext->ConnectionInfo.Algorithm.AEADCipherSuite = StructTable[Index].AlgSupported;
+        break;
+      case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_REQ_BASE_ASYM_ALG:
+        SpdmContext->ConnectionInfo.Algorithm.ReqBaseAsymAlg = StructTable[Index].AlgSupported;
+        break;
+      case SPDM_NEGOTIATE_ALGORITHMS_STRUCT_TABLE_ALG_TYPE_KEY_SCHEDULE:
+        SpdmContext->ConnectionInfo.Algorithm.KeySchedule = StructTable[Index].AlgSupported;
+        break;
+      }
+    }
+
+    AlgoSize = GetSpdmDHEKeySize (SpdmContext);
+    if (AlgoSize == 0xFFFFFFFF) {
+      return RETURN_SECURITY_VIOLATION;
+    }
+    AlgoSize = GetSpdmAeadKeySize (SpdmContext);
+    if (AlgoSize == 0xFFFFFFFF) {
+      return RETURN_SECURITY_VIOLATION;
+    }
+    if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MUT_AUTH_CAP) != 0) {
+      AlgoSize = GetSpdmReqAsymSize (SpdmContext);
+      if (AlgoSize == 0xFFFFFFFF) {
+        return RETURN_SECURITY_VIOLATION;
+      }
+    }
+  }
+  SpdmContext->SpdmCmdReceiveState |= SPDM_NEGOTIATE_ALGORITHMS_RECEIVE_FLAG;
   return RETURN_SUCCESS;
 }
+
+RETURN_STATUS
+EFIAPI
+SpdmNegotiateAlgorithms (
+  IN     SPDM_DEVICE_CONTEXT  *SpdmContext
+  )
+{
+  UINTN Retry = SpdmContext->RetryTimes;
+  RETURN_STATUS Status;
+
+  while(Retry-- != 0) {
+    Status = TrySpdmNegotiateAlgorithms(SpdmContext);
+    if (RETURN_NO_RESPONSE != Status)
+      return Status;
+  }
+
+  return Status;
+}
+

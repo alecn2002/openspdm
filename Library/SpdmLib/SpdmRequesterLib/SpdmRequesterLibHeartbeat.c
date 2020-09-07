@@ -13,7 +13,7 @@ RETURN_STATUS
 EFIAPI
 SpdmHeartbeat (
   IN     VOID                 *Context,
-  IN     UINT8                SessionId
+  IN     UINT32               SessionId
   )
 {
   RETURN_STATUS                             Status;
@@ -23,6 +23,10 @@ SpdmHeartbeat (
   SPDM_DEVICE_CONTEXT                       *SpdmContext;
 
   SpdmContext = Context;
+
+  if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_HBEAT_CAP) == 0) {
+    return RETURN_DEVICE_ERROR;
+  }
 
   SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
   SpdmRequest.Header.RequestResponseCode = SPDM_HEARTBEAT;

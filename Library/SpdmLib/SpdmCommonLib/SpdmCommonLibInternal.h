@@ -24,6 +24,7 @@ typedef struct {
   UINT32               BaseHashAlgo;
   UINT16               DHENamedGroup;
   UINT16               AEADCipherSuite;
+  UINT16               ReqBaseAsymAlg;
   UINT16               KeySchedule;
 } SPDM_DEVICE_ALGORITHM;
 
@@ -63,8 +64,17 @@ typedef struct {
   //
   // My Private Certificate
   //
-  VOID                            *PrivatePem;
-  UINTN                           PrivatePemSize;
+  SPDM_DATA_SIGN_FUNC             SpdmDataSignFunc;
+  //
+  // Peer Root Certificate Hash
+  //
+  VOID                            *PeerRootCertHashVarBuffer;
+  UINTN                           PeerRootCertHashVarBufferSize;
+  //
+  // Peer CertificateChain
+  //
+  VOID                            *PeerCertChainVarBuffer;
+  UINTN                           PeerCertChainVarBufferSize;
   //
   // measurement collected in the responder
   // SPDM_MEASUREMENT_BLOCK + Hash
@@ -72,15 +82,27 @@ typedef struct {
   VOID                            *DeviceMeasurement;
   UINT8                           DeviceMeasurementCount;
   //
-  // Peer Certificate
-  //
-  VOID                            *SpdmCertChainVarBuffer;
-  UINTN                           SpdmCertChainVarBufferSize;
-  //
   // PSK provision locally
   //
   UINTN                           PskSize;
   UINT8                           *Psk;
+  UINTN                           PskHintSize;
+  UINT8                           *PskHint;
+  //
+  // OpaqueData provision locally
+  //
+  UINTN                           OpaqueChallengeAuthRspSize;
+  UINT8                           *OpaqueChallengeAuthRsp;
+  UINTN                           OpaqueMeasurementRspSize;
+  UINT8                           *OpaqueMeasurementRsp;
+  UINTN                           OpaqueKeyExchangeReqSize;
+  UINT8                           *OpaqueKeyExchangeReq;
+  UINTN                           OpaqueKeyExchangeRspSize;
+  UINT8                           *OpaqueKeyExchangeRsp;
+  UINTN                           OpaquePskExchangeReqSize;
+  UINT8                           *OpaquePskExchangeReq;
+  UINTN                           OpaquePskExchangeRspSize;
+  UINT8                           *OpaquePskExchangeRsp;
   //
   // Responder policy
   //
@@ -91,9 +113,14 @@ typedef struct {
   //
   // Peer device info (negotiated)
   //
-  UINT16                          Version;
+  UINT8                           Version[MAX_SPDM_VERSION_COUNT];
   SPDM_DEVICE_CAPABILITY          Capability;
   SPDM_DEVICE_ALGORITHM           Algorithm;
+  //
+  // Peer CertificateChain
+  //
+  UINT8                           PeerCertChainBuffer[MAX_SPDM_MESSAGE_BUFFER_SIZE];
+  UINTN                           PeerCertChainBufferSize;
 } SPDM_CONNECTION_INFO;
 
 
@@ -224,7 +251,7 @@ typedef struct {
 } SPDM_SESSION_INFO_APPLICATION_SECRET;
 
 typedef struct {
-  UINT8                                SessionId;
+  UINT32                               SessionId;
   BOOLEAN                              UsePsk;
   UINT8                                MutAuthRequested;
   SPDM_STATE                           SessionState;
@@ -244,16 +271,35 @@ typedef struct {
   LARGE_MANAGED_BUFFER                 CertificateChainBuffer;
 } SPDM_ENCAP_CONTEXT;
 
+typedef enum {
+  SpdmResponseStateNormal,
+  SpdmResponseStateBusy,
+  SpdmResponseStateNotReady,
+  SpdmResponseStateNeedResync,
+  SpdmResponseStateMax,
+} SPDM_RESPONSE_STATE;
+
 #define SPDM_DEVICE_CONTEXT_VERSION 0x1
+
+///
+/// SPDM request command receive Flags (responder only)
+///
+#define SPDM_GET_VERSION_RECEIVE_FLAG                   BIT0 // responder only
+#define SPDM_GET_CAPABILITIES_RECEIVE_FLAG              BIT1
+#define SPDM_NEGOTIATE_ALGORITHMS_RECEIVE_FLAG          BIT2
+#define SPDM_GET_DIGESTS_RECEIVE_FLAG                   BIT3
+#define SPDM_GET_CERTIFICATE_RECEIVE_FLAG               BIT4
+#define SPDM_CHALLENGE_RECEIVE_FLAG                     BIT5
+#define SPDM_GET_MEASUREMENTS_RECEIVE_FLAG              BIT6
 
 typedef struct {
   UINT32                          Version;
-  SPDM_IO_PROTOCOL                *SpdmIo;
   //
   // IO information
   //
-  SPDM_IO_SECURE_MESSAGING_TYPE   SecureMessageType;
-  UINT32                          Alignment;
+  SPDM_DEVICE_SEND_MESSAGE_FUNC     SendMessage;
+  SPDM_DEVICE_RECEIVE_MESSAGE_FUNC  ReceiveMessage;
+  UINT32                            Alignment;
   
   //
   // Command Status
@@ -283,6 +329,25 @@ typedef struct {
   SPDM_TRANSCRIPT                 Transcript;
 
   SPDM_SESSION_INFO               SessionInfo[MAX_SPDM_SESSION_COUNT];
+  //
+  // Register Spdm request command receive Status (responder only)
+  //
+  UINT64                          SpdmCmdReceiveState;
+  //
+  // Register for Responder state, be initial to Normal (responder only)
+  //
+  SPDM_RESPONSE_STATE             ResponseState;
+  //
+  // Cached data for SPDM_ERROR_CODE_RESPONSE_NOT_READY/SPDM_RESPOND_IF_READY
+  //
+  SPDM_ERROR_DATA_RESPONSE_NOT_READY  ErrorData;
+  UINT8                           CachSpdmRequest[MAX_SPDM_MESSAGE_BUFFER_SIZE];
+  UINTN                           CachSpdmRequestSize;
+  UINT8                           CurrentToken;
+  //
+  // Register for the retry times when receive "BUSY" Error response (requester only)
+  //
+  UINT8                           RetryTimes;
 } SPDM_DEVICE_CONTEXT;
 
 typedef
@@ -432,7 +497,7 @@ GetSpdmHashSize (
   );
 
 /**
-  This function returns the SPDM hash size.
+  This function returns the SPDM asym size.
 
   @param[in]  SpdmContext             The SPDM context for the device.
   
@@ -440,6 +505,18 @@ GetSpdmHashSize (
 **/
 UINT32
 GetSpdmAsymSize (
+  IN SPDM_DEVICE_CONTEXT          *SpdmContext
+  );
+
+/**
+  This function returns the SPDM Request asym size.
+
+  @param[in]  SpdmContext             The SPDM context for the device.
+  
+  @return TCG SPDM hash size
+**/
+UINT32
+GetSpdmReqAsymSize (
   IN SPDM_DEVICE_CONTEXT          *SpdmContext
   );
 
@@ -580,6 +657,31 @@ GetSpdmAsymVerify (
   IN SPDM_DEVICE_CONTEXT          *SpdmContext
   );
 
+ASYM_GET_PUBLIC_KEY_FROM_X509
+GetSpdmReqAsymGetPublicKeyFromX509 (
+  IN SPDM_DEVICE_CONTEXT          *SpdmContext
+  );
+
+ASYM_GET_PRIVATE_KEY_FROM_PEM
+GetSpdmReqAsymGetPrivateKeyFromPem (
+  IN SPDM_DEVICE_CONTEXT          *SpdmContext
+  );
+
+ASYM_FREE
+GetSpdmReqAsymFree (
+  IN SPDM_DEVICE_CONTEXT          *SpdmContext
+  );
+
+ASYM_SIGN
+GetSpdmReqAsymSign (
+  IN SPDM_DEVICE_CONTEXT          *SpdmContext
+  );
+
+ASYM_VERIFY
+GetSpdmReqAsymVerify (
+  IN SPDM_DEVICE_CONTEXT          *SpdmContext
+  );
+
 VOID
 GetRandomNumber (
   IN  UINTN                     Size,
@@ -593,6 +695,15 @@ RETURN_STATUS
 AppendManagedBuffer (
   IN OUT VOID            *ManagedBuffer,
   IN VOID                *Buffer,
+  IN UINTN               BufferSize
+  );
+
+/**
+  Shrink the size of the managed buffer.
+**/
+RETURN_STATUS
+ShrinkManagedBuffer (
+  IN OUT VOID            *MBuffer,
   IN UINTN               BufferSize
   );
 
@@ -631,7 +742,7 @@ GetManagedBuffer (
 RETURN_STATUS
 SpdmGenerateSessionHandshakeKey (
   IN SPDM_DEVICE_CONTEXT          *SpdmContext,
-  IN UINT8                        SessionId,
+  IN UINT32                       SessionId,
   IN BOOLEAN                      IsRequester
   );
 
@@ -643,7 +754,7 @@ SpdmGenerateSessionHandshakeKey (
 RETURN_STATUS
 SpdmGenerateSessionDataKey (
   IN SPDM_DEVICE_CONTEXT          *SpdmContext,
-  IN UINT8                        SessionId,
+  IN UINT32                       SessionId,
   IN BOOLEAN                      IsRequester
   );
 
@@ -661,7 +772,7 @@ typedef enum {
 RETURN_STATUS
 SpdmCreateUpdateSessionDataKey (
   IN SPDM_DEVICE_CONTEXT          *SpdmContext,
-  IN UINT8                        SessionId,
+  IN UINT32                       SessionId,
   IN SPDM_KEY_UPDATE_ACTION       Action
   );
 
@@ -673,7 +784,7 @@ SpdmCreateUpdateSessionDataKey (
 RETURN_STATUS
 SpdmFinalizeUpdateSessionDataKey (
   IN SPDM_DEVICE_CONTEXT          *SpdmContext,
-  IN UINT8                        SessionId,
+  IN UINT32                       SessionId,
   IN SPDM_KEY_UPDATE_ACTION       Action,
   IN BOOLEAN                      UseNewKey
   );
@@ -699,7 +810,25 @@ ComputeDHEFinalKey (
 SPDM_SESSION_INFO *
 SpdmGetSessionInfoViaSessionId (
   IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-  IN     UINT8                     SessionId
+  IN     UINT32                    SessionId
+  );
+
+SPDM_SESSION_INFO *
+SpdmAssignSessionId (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
+  IN     UINT32                    SessionId
+  );
+
+SPDM_SESSION_INFO *
+SpdmFreeSessionId (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
+  IN     UINT32                    SessionId
+  );
+
+BOOLEAN
+SpdmIsVersionSupported (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
+  IN     UINT8                     Version
   );
 
 #endif

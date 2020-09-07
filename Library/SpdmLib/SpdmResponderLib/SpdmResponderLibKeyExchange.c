@@ -24,7 +24,6 @@ SpdmResponderGenerateKeyExchangeSignature (
   OUT UINT8                     *Signature
   )
 {
-  VOID                          *Context;
   UINT8                         HashData[MAX_HASH_SIZE];
   UINT8                         *CertBuffer;
   UINTN                         CertBufferSize;
@@ -33,26 +32,15 @@ SpdmResponderGenerateKeyExchangeSignature (
   UINTN                         SignatureSize;
   UINT32                        HashSize;
   HASH_ALL                      HashFunc;
-  ASYM_GET_PRIVATE_KEY_FROM_PEM GetPrivateKeyFromPemFunc;
-  ASYM_FREE                     FreeFunc;
-  ASYM_SIGN                     SignFunc;
   LARGE_MANAGED_BUFFER          THCurr = {MAX_SPDM_MESSAGE_BUFFER_SIZE};
 
-  if (SpdmContext->LocalContext.PrivatePem == NULL) {
+  if (SpdmContext->LocalContext.SpdmDataSignFunc == NULL) {
     return FALSE;
   }
 
   SignatureSize = GetSpdmAsymSize (SpdmContext);
   HashSize = GetSpdmHashSize (SpdmContext);
   HashFunc = GetSpdmHashFunc (SpdmContext);
-
-  GetPrivateKeyFromPemFunc = GetSpdmAsymGetPrivateKeyFromPem (SpdmContext);
-  FreeFunc = GetSpdmAsymFree (SpdmContext);
-  SignFunc = GetSpdmAsymSign (SpdmContext);
-  Result = GetPrivateKeyFromPemFunc (SpdmContext->LocalContext.PrivatePem, SpdmContext->LocalContext.PrivatePemSize, NULL, &Context);
-  if (!Result) {
-    return FALSE;
-  }
 
   if ((SpdmContext->LocalContext.CertificateChain[SlotNum] == NULL) || (SpdmContext->LocalContext.CertificateChainSize[SlotNum] == 0)) {
     return FALSE;
@@ -79,14 +67,15 @@ SpdmResponderGenerateKeyExchangeSignature (
   InternalDumpData (HashData, HashSize);
   DEBUG((DEBUG_INFO, "\n"));
 
-  Result = SignFunc (
-             Context,
+  Result = SpdmContext->LocalContext.SpdmDataSignFunc (
+             SpdmContext,
+             TRUE,
+             SpdmContext->ConnectionInfo.Algorithm.BaseAsymAlgo,
              HashData,
              HashSize,
              Signature,
              &SignatureSize
              );
-  FreeFunc (Context);
 
   return Result;
 }
@@ -161,15 +150,18 @@ SpdmGetResponseKeyExchange (
   UINT32                        SignatureSize;
   UINT32                        HmacSize;
   UINT8                         *Ptr;
+  UINT16                        OpaqueDataLength;
   BOOLEAN                       Result;
   UINT8                         SlotNum;
-  UINT8                         SessionId;
+  UINT32                        SessionId;
   VOID                          *DHEContext;
   UINT8                         FinalKey[MAX_DHE_KEY_SIZE];
   UINTN                         FinalKeySize;
   SPDM_SESSION_INFO             *SessionInfo;
   UINTN                         TotalSize;
   SPDM_DEVICE_CONTEXT           *SpdmContext;
+  UINT16                        ReqSessionId;
+  UINT16                        RspSessionId;
 
   SpdmContext = Context;
 
@@ -181,19 +173,35 @@ SpdmGetResponseKeyExchange (
     return RETURN_SUCCESS;
   }
 
-  if (SpdmRequest->DHE_Named_Group != SpdmContext->ConnectionInfo.Algorithm.DHENamedGroup) {
-    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
-    return RETURN_SUCCESS;
-  }
-
   SignatureSize = GetSpdmAsymSize (SpdmContext);
   HashSize = GetSpdmHashSize (SpdmContext);
   HmacSize = GetSpdmHashSize (SpdmContext);
   DHEKeySize = GetSpdmDHEKeySize (SpdmContext);
 
+  if (RequestSize < sizeof(SPDM_KEY_EXCHANGE_REQUEST) +
+                    DHEKeySize +
+                    sizeof(UINT16)) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
+  OpaqueDataLength = *(UINT16 *)((UINT8 *)Request + sizeof(SPDM_KEY_EXCHANGE_REQUEST) + DHEKeySize);
+  if (RequestSize < sizeof(SPDM_KEY_EXCHANGE_REQUEST) +
+                    DHEKeySize +
+                    sizeof(UINT16) +
+                    OpaqueDataLength) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
+  RequestSize = sizeof(SPDM_KEY_EXCHANGE_REQUEST) +
+                DHEKeySize +
+                sizeof(UINT16) +
+                OpaqueDataLength;
+
   TotalSize = sizeof(SPDM_KEY_EXCHANGE_RESPONSE) +
               DHEKeySize +
               HashSize +
+              sizeof(UINT16) +
+              SpdmContext->LocalContext.OpaqueKeyExchangeRspSize +
               SignatureSize +
               HmacSize;
 
@@ -206,15 +214,19 @@ SpdmGetResponseKeyExchange (
   SpdmResponse->Header.RequestResponseCode = SPDM_KEY_EXCHANGE_RSP;
   SpdmResponse->Header.Param1 = 0;
 
-  SessionInfo = SpdmAllocateSessionId (SpdmContext, &SessionId);
+  ReqSessionId = SpdmRequest->ReqSessionID;
+  RspSessionId = SpdmAllocateRspSessionId (SpdmContext);
+  SessionId = (ReqSessionId << 16) | RspSessionId;
+  SessionInfo = SpdmAssignSessionId (SpdmContext, SessionId);
+  ASSERT(SessionInfo != NULL);
   SessionInfo->UsePsk = FALSE;
 
   AppendManagedBuffer (&SessionInfo->SessionTranscript.MessageK, Request, RequestSize);
 
-  SpdmResponse->Header.Param2 = SessionId;
+  SpdmResponse->RspSessionID = RspSessionId;
 
-  SpdmResponse->Length = (UINT16)*ResponseSize;
   SpdmResponse->MutAuthRequested = SpdmContext->LocalContext.MutAuthRequested;
+  SpdmResponse->SlotIDParam = 0;
 
   GetRandomNumber (SPDM_RANDOM_DATA_SIZE, SpdmResponse->RandomData);
   
@@ -244,6 +256,11 @@ SpdmGetResponseKeyExchange (
     return RETURN_SUCCESS;
   }
   Ptr += HashSize;
+
+  *(UINT16 *)Ptr = (UINT16)SpdmContext->LocalContext.OpaqueKeyExchangeRspSize;
+  Ptr += sizeof(UINT16);
+  CopyMem (Ptr, SpdmContext->LocalContext.OpaqueKeyExchangeRsp, SpdmContext->LocalContext.OpaqueKeyExchangeRspSize);
+  Ptr += SpdmContext->LocalContext.OpaqueKeyExchangeRspSize;
 
   AppendManagedBuffer (&SessionInfo->SessionTranscript.MessageK, SpdmResponse, (UINTN)Ptr - (UINTN)SpdmResponse);
   Result = SpdmResponderGenerateKeyExchangeSignature (SpdmContext, SessionInfo, SlotNum, Ptr);

@@ -87,7 +87,7 @@ SpdmProcessEncapsulatedRequest (
 RETURN_STATUS
 SpdmEncapsulatedRequest (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId
+  IN     UINT32               SessionId
   )
 {
   RETURN_STATUS                               Status;
@@ -106,6 +106,10 @@ SpdmEncapsulatedRequest (
   VOID                                        *EncapsulatedResponse;
   UINTN                                       EncapsulatedResponseSize;
   
+  if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_ENCAP_CAP) == 0) {
+    return RETURN_DEVICE_ERROR;
+  }
+
   SessionInfo = SpdmGetSessionInfoViaSessionId (SpdmContext, SessionId);
   if (SessionInfo == NULL) {
     ASSERT (FALSE);
@@ -183,7 +187,8 @@ SpdmEncapsulatedRequest (
     if (SpdmResponseSize < sizeof(SPDM_ENCAPSULATED_RESPONSE_ACK_RESPONSE)) {
       return RETURN_DEVICE_ERROR;
     }
-    if (SpdmResponseSize == sizeof(SPDM_ENCAPSULATED_RESPONSE_ACK_RESPONSE)) {
+    if ((SpdmEncapsulatedResponseAckResponse->Header.Param2 == SPDM_ENCAPSULATED_RESPONSE_ACK_RESPONSE_PAYLOAD_TYPE_ABSENT) &&
+        (SpdmResponseSize == sizeof(SPDM_ENCAPSULATED_RESPONSE_ACK_RESPONSE))) {
       //
       // Done
       //

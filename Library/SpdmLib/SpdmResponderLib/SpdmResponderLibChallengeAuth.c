@@ -97,31 +97,19 @@ SpdmResponderGenerateChallengeSignature (
   OUT UINT8                      *Signature
   )
 {
-  VOID                          *Context;
   UINT8                         HashData[MAX_HASH_SIZE];
   BOOLEAN                       Result;
   UINTN                         SignatureSize;
   UINT32                        HashSize;
   HASH_ALL                      HashFunc;
-  ASYM_GET_PRIVATE_KEY_FROM_PEM GetPrivateKeyFromPemFunc;
-  ASYM_FREE                     FreeFunc;
-  ASYM_SIGN                     SignFunc;
   
-  if (SpdmContext->LocalContext.PrivatePem == NULL) {
+  if (SpdmContext->LocalContext.SpdmDataSignFunc == NULL) {
     return FALSE;
   }
 
   SignatureSize = GetSpdmAsymSize (SpdmContext);
   HashSize = GetSpdmHashSize (SpdmContext);
   HashFunc = GetSpdmHashFunc (SpdmContext);
-
-  GetPrivateKeyFromPemFunc = GetSpdmAsymGetPrivateKeyFromPem (SpdmContext);
-  FreeFunc = GetSpdmAsymFree (SpdmContext);
-  SignFunc = GetSpdmAsymSign (SpdmContext);
-  Result = GetPrivateKeyFromPemFunc (SpdmContext->LocalContext.PrivatePem, SpdmContext->LocalContext.PrivatePemSize, NULL, &Context);
-  if (!Result) {
-    return FALSE;
-  }
 
   AppendManagedBuffer (&SpdmContext->Transcript.MessageC, ResponseMessage, ResponseMessageSize);
   AppendManagedBuffer (&SpdmContext->Transcript.M1M2, GetManagedBuffer(&SpdmContext->Transcript.MessageA), GetManagedBufferSize(&SpdmContext->Transcript.MessageA));
@@ -142,14 +130,15 @@ SpdmResponderGenerateChallengeSignature (
   InternalDumpData (HashData, HashSize);
   DEBUG((DEBUG_INFO, "\n"));
   
-  Result = SignFunc (
-             Context,
+  Result = SpdmContext->LocalContext.SpdmDataSignFunc (
+             SpdmContext,
+             TRUE,
+             SpdmContext->ConnectionInfo.Algorithm.BaseAsymAlgo,
              HashData,
              HashSize,
              Signature,
              &SignatureSize
              );
-  FreeFunc (Context);
 
   return Result;
 }
@@ -181,6 +170,12 @@ SpdmGetResponseChallenge (
     SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
     return RETURN_SUCCESS;
   }
+  if (((SpdmContext->SpdmCmdReceiveState & SPDM_NEGOTIATE_ALGORITHMS_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CERTIFICATE_RECEIVE_FLAG) == 0)) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_UNEXPECTED_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
   SpdmRequestSize = RequestSize;
   //
   // Cache
@@ -202,7 +197,7 @@ SpdmGetResponseChallenge (
               SPDM_NONCE_SIZE +
               HashSize +
               sizeof(UINT16) +
-              DEFAULT_OPAQUE_LENGTH +
+              SpdmContext->LocalContext.OpaqueChallengeAuthRspSize +
               SignatureSize;
 
   ASSERT (*ResponseSize >= TotalSize);
@@ -210,7 +205,11 @@ SpdmGetResponseChallenge (
   ZeroMem (Response, *ResponseSize);
   SpdmResponse = Response;
 
-  SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+  } else {
+    SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  }
   SpdmResponse->Header.RequestResponseCode = SPDM_CHALLENGE_AUTH;
   SpdmResponse->Header.Param1 = SlotNum;
   SpdmResponse->Header.Param2 = (1 << SlotNum);
@@ -229,10 +228,10 @@ SpdmGetResponseChallenge (
   }
   Ptr += HashSize;
 
-  *(UINT16 *)Ptr = DEFAULT_OPAQUE_LENGTH;
+  *(UINT16 *)Ptr = (UINT16)SpdmContext->LocalContext.OpaqueChallengeAuthRspSize;
   Ptr += sizeof(UINT16);
-  SetMem (Ptr, DEFAULT_OPAQUE_LENGTH, DEFAULT_OPAQUE_DATA);
-  Ptr += DEFAULT_OPAQUE_LENGTH;
+  CopyMem (Ptr, SpdmContext->LocalContext.OpaqueChallengeAuthRsp, SpdmContext->LocalContext.OpaqueChallengeAuthRspSize);
+  Ptr += SpdmContext->LocalContext.OpaqueChallengeAuthRspSize;
   
   //
   // Calc Sign
@@ -248,6 +247,7 @@ SpdmGetResponseChallenge (
   // Reset
   //
   ResetManagedBuffer (&SpdmContext->Transcript.M1M2);
+  SpdmContext->SpdmCmdReceiveState |= SPDM_CHALLENGE_RECEIVE_FLAG;
 
   return RETURN_SUCCESS;
 }

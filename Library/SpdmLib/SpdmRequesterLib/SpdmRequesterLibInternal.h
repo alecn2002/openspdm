@@ -11,6 +11,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #define __SPDM_REQUESTER_LIB_INTERNAL_H__
 
 #include <Library/SpdmRequesterLib.h>
+#include <Library/SpdmEncodingLib.h>
 #include "SpdmCommonLibInternal.h"
 
 RETURN_STATUS
@@ -19,6 +20,29 @@ SpdmGetVersion (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
   IN OUT UINT8                *VersionCount,
      OUT VOID                 *VersionNumberEntries
+  );
+
+RETURN_STATUS
+EFIAPI
+SpdmHandleErrorResponseMain (
+  IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
+  IN OUT VOID                 *MBuffer,
+  IN     UINTN                 ShrinkBufferSize,
+  IN OUT UINTN                *ResponseSize,
+  IN OUT VOID                 *Response,
+  IN     UINT8                 OriginRequestCode,
+  IN     UINT8                 ExpectResponseCode,
+  IN     UINTN                 ExpectResponseSize
+  );
+
+RETURN_STATUS
+EFIAPI
+SpdmRequesterRespondIfReady (
+  IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
+  IN OUT UINTN                *ResponseSize,
+  IN OUT VOID                 *Response,
+  IN     UINT8                 ExpectResponseCode,
+  IN     UINTN                 ExpectResponseSize
   );
 
 RETURN_STATUS
@@ -52,7 +76,7 @@ SpdmSendReceiveKeyExchange (
   IN     UINT8                MeasurementHashType,
   IN     UINT8                SlotNum,
      OUT UINT8                *HeartbeatPeriod,
-     OUT UINT8                *SessionId,
+     OUT UINT32               *SessionId,
      OUT VOID                 *MeasurementHash
   );
 
@@ -65,7 +89,7 @@ SpdmSendReceiveKeyExchange (
 RETURN_STATUS
 SpdmSendReceiveFinish (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     UINT8                SlotNum
   );
 
@@ -80,7 +104,7 @@ SpdmSendReceivePskExchange (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
   IN     UINT8                MeasurementHashType,
      OUT UINT8                *HeartbeatPeriod,
-     OUT UINT8                *SessionId,
+     OUT UINT32               *SessionId,
      OUT VOID                 *MeasurementHash
   );
 
@@ -93,7 +117,7 @@ SpdmSendReceivePskExchange (
 RETURN_STATUS
 SpdmSendReceivePskFinish (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId
+  IN     UINT32               SessionId
   );
 
 /**
@@ -105,7 +129,7 @@ SpdmSendReceivePskFinish (
 RETURN_STATUS
 SpdmSendReceiveEndSession (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     UINT8                EndSessionAttributes
   );
 
@@ -117,7 +141,7 @@ SpdmSendReceiveEndSession (
 RETURN_STATUS
 SpdmEncapsulatedRequest (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId
+  IN     UINT32               SessionId
   );
 
 RETURN_STATUS
@@ -165,7 +189,7 @@ SpdmSendRequest (
 RETURN_STATUS
 SpdmSendRequestSession (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN     UINTN                RequestSize,
   IN     VOID                 *Request
   );
@@ -196,21 +220,14 @@ SpdmReceiveResponse (
 RETURN_STATUS
 SpdmReceiveResponseSession (
   IN     SPDM_DEVICE_CONTEXT  *SpdmContext,
-  IN     UINT8                SessionId,
+  IN     UINT32               SessionId,
   IN OUT UINTN                *ResponseSize,
   IN OUT VOID                 *Response
   );
 
-SPDM_SESSION_INFO *
-SpdmAssignSessionId (
-  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-  IN     UINT8                     SessionId
-  );
-
-SPDM_SESSION_INFO *
-SpdmFreeSessionId (
-  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-  IN     UINT8                     SessionId
+UINT16
+SpdmAllocateReqSessionId (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext
   );
 
 #endif

@@ -30,6 +30,13 @@ SpdmGetResponseCapability (
     SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
     return RETURN_SUCCESS;
   }
+  if ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_VERSION_RECEIVE_FLAG) == 0) {
+    SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_UNEXPECTED_REQUEST, 0, ResponseSize, Response);
+    return RETURN_SUCCESS;
+  }
+  if (SpdmContext->ResponseState != SpdmResponseStateNormal) {
+    return SpdmResponderHandleResponseState(SpdmContext, SpdmRequest->Header.RequestResponseCode, ResponseSize, Response);
+  }
   SpdmRequestSize = RequestSize;
   //
   // Cache
@@ -41,7 +48,11 @@ SpdmGetResponseCapability (
   ZeroMem (Response, *ResponseSize);
   SpdmResponse = Response;
 
-  SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+  } else {
+    SpdmResponse->Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  }
   SpdmResponse->Header.RequestResponseCode = SPDM_CAPABILITIES;
   SpdmResponse->Header.Param1 = 0;
   SpdmResponse->Header.Param2 = 0;
@@ -52,8 +63,11 @@ SpdmGetResponseCapability (
   //
   AppendManagedBuffer (&SpdmContext->Transcript.MessageA, SpdmResponse, *ResponseSize);
   
-  SpdmContext->ConnectionInfo.Capability.CTExponent = SpdmRequest->CTExponent;
-  SpdmContext->ConnectionInfo.Capability.Flags = SpdmRequest->Flags;
+  if (SpdmResponse->Header.SPDMVersion >= SPDM_MESSAGE_VERSION_11) {
+    SpdmContext->ConnectionInfo.Capability.CTExponent = SpdmRequest->CTExponent;
+    SpdmContext->ConnectionInfo.Capability.Flags = SpdmRequest->Flags;
+  }
+  SpdmContext->SpdmCmdReceiveState |= SPDM_GET_CAPABILITIES_RECEIVE_FLAG;
 
   return RETURN_SUCCESS;
 }

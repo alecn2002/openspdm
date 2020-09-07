@@ -13,21 +13,26 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 
 typedef struct {
   SPDM_MESSAGE_HEADER  Header;
-  UINT32               DHE_Named_Group;
+  UINT16               ReqSessionID;
+  UINT16               Reserved;
   UINT8                RandomData[SPDM_RANDOM_DATA_SIZE];
   UINT8                ExchangeData[MAX_DHE_KEY_SIZE];
+  UINT16               OpaqueLength;
+  UINT8                OpaqueData[MAX_SPDM_OPAQUE_DATA_SIZE];
 } SPDM_KEY_EXCHANGE_REQUEST_MINE;
 
 typedef struct {
   SPDM_MESSAGE_HEADER  Header;
-  UINT16               Length;
+  UINT16               RspSessionID;
   UINT8                MutAuthRequested;
-  UINT8                Reserved;
+  UINT8                SlotIDParam;
   UINT8                RandomData[SPDM_RANDOM_DATA_SIZE];
   UINT8                ExchangeData[MAX_DHE_KEY_SIZE];
   UINT8                MeasurementSummaryHash[MAX_HASH_SIZE];
+  UINT16               OpaqueLength;
+  UINT8                OpaqueData[MAX_SPDM_OPAQUE_DATA_SIZE];
   UINT8                Signature[MAX_ASYM_KEY_SIZE];
-  UINT8                VerifyData[MAX_HASH_SIZE];
+  UINT8                ResponderVer[MAX_HASH_SIZE];
 } SPDM_KEY_EXCHANGE_RESPONSE_MAX;
 
 #pragma pack()
@@ -57,11 +62,11 @@ SpdmRequesterVerifyKeyExchangeSignature (
   ASSERT(HashFunc != NULL);
   HashSize = GetSpdmHashSize (SpdmContext);
 
-  if ((SpdmContext->LocalContext.SpdmCertChainVarBuffer == NULL) || (SpdmContext->LocalContext.SpdmCertChainVarBufferSize == 0)) {
+  if (SpdmContext->ConnectionInfo.PeerCertChainBufferSize == 0) {
     return FALSE;
   }
-  CertBuffer = (UINT8 *)SpdmContext->LocalContext.SpdmCertChainVarBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
+  CertBuffer = (UINT8 *)SpdmContext->ConnectionInfo.PeerCertChainBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
+  CertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
   HashFunc (CertBuffer, CertBufferSize, CertBufferHash);
 
   DEBUG((DEBUG_INFO, "MessageA Data :\n"));
@@ -129,11 +134,11 @@ SpdmRequesterVerifyKeyExchangeHmac (
   HashSize = GetSpdmHashSize (SpdmContext);
   ASSERT(HashSize == HmacDataSize);
 
-  if ((SpdmContext->LocalContext.SpdmCertChainVarBuffer == NULL) || (SpdmContext->LocalContext.SpdmCertChainVarBufferSize == 0)) {
+  if (SpdmContext->ConnectionInfo.PeerCertChainBufferSize == 0) {
     return FALSE;
   }
-  CertBuffer = (UINT8 *)SpdmContext->LocalContext.SpdmCertChainVarBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
+  CertBuffer = (UINT8 *)SpdmContext->ConnectionInfo.PeerCertChainBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
+  CertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
   HashFunc (CertBuffer, CertBufferSize, CertBufferHash);
 
   DEBUG((DEBUG_INFO, "MessageA Data :\n"));
@@ -176,7 +181,7 @@ SpdmSendReceiveKeyExchange (
   IN     UINT8                MeasurementHashType,
   IN     UINT8                SlotNum,
      OUT UINT8                *HeartbeatPeriod,
-     OUT UINT8                *SessionId,
+     OUT UINT32               *SessionId,
      OUT VOID                 *MeasurementHash
   )
 {
@@ -192,11 +197,14 @@ SpdmSendReceiveKeyExchange (
   UINT32                                    HmacSize;
   UINT8                                     *Ptr;
   VOID                                      *MeasurementSummaryHash;
+  UINT16                                    OpaqueLength;
   UINT8                                     *Signature;
   UINT8                                     *VerifyData;
   VOID                                      *DHEContext;
   UINT8                                     FinalKey[MAX_DHE_KEY_SIZE];
   UINTN                                     FinalKeySize;
+  UINT16                                    ReqSessionId;
+  UINT16                                    RspSessionId;
   SPDM_SESSION_INFO                         *SessionInfo;
 
   if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_KEY_EX_CAP) == 0) {
@@ -209,17 +217,27 @@ SpdmSendReceiveKeyExchange (
   SpdmRequest.Header.RequestResponseCode = SPDM_KEY_EXCHANGE;
   SpdmRequest.Header.Param1 = MeasurementHashType;
   SpdmRequest.Header.Param2 = SlotNum;
-  SpdmRequest.DHE_Named_Group = SpdmContext->ConnectionInfo.Algorithm.DHENamedGroup;
   GetRandomNumber (SPDM_RANDOM_DATA_SIZE, SpdmRequest.RandomData);
   DEBUG((DEBUG_INFO, "ClientRandomData (0x%x) - ", SPDM_RANDOM_DATA_SIZE));
   InternalDumpData (SpdmRequest.RandomData, SPDM_RANDOM_DATA_SIZE);
   DEBUG((DEBUG_INFO, "\n"));
 
+  ReqSessionId = SpdmAllocateReqSessionId (SpdmContext);
+  SpdmRequest.ReqSessionID = ReqSessionId;
+
+  Ptr = SpdmRequest.ExchangeData;
   DHEKeySize = GetSpdmDHEKeySize (SpdmContext);
-  GenerateDHESelfKey (SpdmContext, DHEKeySize, SpdmRequest.ExchangeData, &DHEContext);
+  GenerateDHESelfKey (SpdmContext, DHEKeySize, Ptr, &DHEContext);
   DEBUG((DEBUG_INFO, "ClientKey (0x%x):\n", DHEKeySize));
-  InternalDumpHex (SpdmRequest.ExchangeData, DHEKeySize);
-  SpdmRequestSize = sizeof(SPDM_KEY_EXCHANGE_REQUEST) + DHEKeySize;
+  InternalDumpHex (Ptr, DHEKeySize);
+  Ptr += DHEKeySize;
+
+  *(UINT16 *)Ptr = (UINT16)SpdmContext->LocalContext.OpaqueKeyExchangeReqSize;
+  Ptr += sizeof(UINT16);
+  CopyMem (Ptr, SpdmContext->LocalContext.OpaqueKeyExchangeReq, SpdmContext->LocalContext.OpaqueKeyExchangeReqSize);
+  Ptr += SpdmContext->LocalContext.OpaqueKeyExchangeReqSize;
+
+  SpdmRequestSize = (UINTN)Ptr - (UINTN)&SpdmRequest;
   Status = SpdmSendRequest (SpdmContext, SpdmRequestSize, &SpdmRequest);
   if (RETURN_ERROR(Status)) {
     return RETURN_DEVICE_ERROR;
@@ -244,7 +262,8 @@ SpdmSendReceiveKeyExchange (
   if (HeartbeatPeriod != NULL) {
     *HeartbeatPeriod = SpdmResponse.Header.Param1;
   }
-  *SessionId = SpdmResponse.Header.Param2;
+  RspSessionId = SpdmResponse.RspSessionID;
+  *SessionId = (ReqSessionId << 16) | RspSessionId;
   SessionInfo = SpdmAssignSessionId (SpdmContext, *SessionId);
   SessionInfo->UsePsk = FALSE;
 
@@ -256,16 +275,15 @@ SpdmSendReceiveKeyExchange (
   SignatureSize = GetSpdmAsymSize (SpdmContext);
   HashSize = GetSpdmHashSize (SpdmContext);
   HmacSize = GetSpdmHashSize (SpdmContext);
-  if (SpdmResponseSize != sizeof(SPDM_KEY_EXCHANGE_RESPONSE) +
+  if (SpdmResponseSize <  sizeof(SPDM_KEY_EXCHANGE_RESPONSE) +
                           DHEKeySize +
                           HashSize +
+                          sizeof(UINT16) +
                           SignatureSize +
                           HmacSize) {
     SpdmFreeSessionId (SpdmContext, *SessionId);
     return RETURN_DEVICE_ERROR;
   }
-
-  AppendManagedBuffer (&SessionInfo->SessionTranscript.MessageK, &SpdmResponse, SpdmResponseSize - SignatureSize - HmacSize);
 
   DEBUG((DEBUG_INFO, "ServerRandomData (0x%x) - ", SPDM_RANDOM_DATA_SIZE));
   InternalDumpData (SpdmResponse.RandomData, SPDM_RANDOM_DATA_SIZE);
@@ -283,6 +301,30 @@ SpdmSendReceiveKeyExchange (
   DEBUG((DEBUG_INFO, "\n"));
 
   Ptr += HashSize;
+
+  OpaqueLength = *(UINT16 *)Ptr;
+  Ptr += sizeof(UINT16);
+  Ptr += OpaqueLength;
+  if (SpdmResponseSize < sizeof(SPDM_KEY_EXCHANGE_RESPONSE) +
+                         DHEKeySize +
+                         HashSize +
+                         sizeof(UINT16) +
+                         OpaqueLength +
+                         SignatureSize +
+                         HmacSize) {
+    SpdmFreeSessionId (SpdmContext, *SessionId);
+    return RETURN_DEVICE_ERROR;
+  }
+
+  SpdmResponseSize = sizeof(SPDM_KEY_EXCHANGE_RESPONSE) +
+                     DHEKeySize +
+                     HashSize +
+                     sizeof(UINT16) +
+                     OpaqueLength +
+                     SignatureSize +
+                     HmacSize;
+
+  AppendManagedBuffer (&SessionInfo->SessionTranscript.MessageK, &SpdmResponse, SpdmResponseSize - SignatureSize - HmacSize);
 
   Signature = Ptr;
   DEBUG((DEBUG_INFO, "Signature (0x%x):\n", SignatureSize));

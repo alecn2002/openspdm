@@ -52,11 +52,11 @@ SpdmRequesterVerifyMeasurementSignature (
   InternalDumpData (HashData, HashSize);
   DEBUG((DEBUG_INFO, "\n"));
   
-  if ((SpdmContext->LocalContext.SpdmCertChainVarBuffer == NULL) || (SpdmContext->LocalContext.SpdmCertChainVarBufferSize == 0)) {
+  if (SpdmContext->ConnectionInfo.PeerCertChainBufferSize == 0) {
     return FALSE;
   }
-  CertBuffer = (UINT8 *)SpdmContext->LocalContext.SpdmCertChainVarBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
+  CertBuffer = (UINT8 *)SpdmContext->ConnectionInfo.PeerCertChainBuffer + sizeof(SPDM_CERT_CHAIN) + HashSize;
+  CertBufferSize = SpdmContext->ConnectionInfo.PeerCertChainBufferSize - (sizeof(SPDM_CERT_CHAIN) + HashSize);
 
   GetPublicKeyFromX509Func = GetSpdmAsymGetPublicKeyFromX509 (SpdmContext);
   FreeFunc = GetSpdmAsymFree (SpdmContext);
@@ -93,6 +93,7 @@ SpdmGetMeasurement (
   IN     VOID                 *Context,
   IN     UINT8                RequestAttribute,
   IN     UINT8                MeasurementOperation,
+  IN     UINT8                SlotNum,
      OUT UINT8                *NumberOfBlocks,
   IN OUT UINT32               *MeasurementRecordLength,
      OUT VOID                 *MeasurementRecord
@@ -115,6 +116,14 @@ SpdmGetMeasurement (
   SPDM_DEVICE_CONTEXT                       *SpdmContext;
 
   SpdmContext = Context;
+  if (((SpdmContext->SpdmCmdReceiveState & SPDM_NEGOTIATE_ALGORITHMS_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CERTIFICATE_RECEIVE_FLAG) == 0)) {
+    return RETURN_DEVICE_ERROR;
+  }
+  if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_MEAS_CAP) == 0) {
+    return RETURN_DEVICE_ERROR;
+  }
 
   SpdmContext->ErrorState = SPDM_STATUS_ERROR_DEVICE_NO_CAPABILITIES;
 
@@ -128,17 +137,26 @@ SpdmGetMeasurement (
     SignatureSize = 0;
   }
 
-  SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+  } else {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  }
   SpdmRequest.Header.RequestResponseCode = SPDM_GET_MEASUREMENTS;
   SpdmRequest.Header.Param1 = RequestAttribute;
   SpdmRequest.Header.Param2 = MeasurementOperation;
   if (RequestAttribute == SPDM_GET_MEASUREMENTS_REQUEST_ATTRIBUTES_GENERATE_SIGNATURE) {
-    SpdmRequestSize = sizeof(SpdmRequest);
+    if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+      SpdmRequestSize = sizeof(SpdmRequest);
+    } else {
+      SpdmRequestSize = sizeof(SpdmRequest) - sizeof(SpdmRequest.SlotIDParam);
+    }
 
     GetRandomNumber (SPDM_NONCE_SIZE, SpdmRequest.Nonce);
     DEBUG((DEBUG_INFO, "ClientNonce - "));
     InternalDumpData (SpdmRequest.Nonce, SPDM_NONCE_SIZE);
     DEBUG((DEBUG_INFO, "\n"));
+    SpdmRequest.SlotIDParam = SlotNum;
   } else {
     SpdmRequestSize = sizeof(SpdmRequest.Header);
   }
@@ -209,10 +227,10 @@ SpdmGetMeasurement (
     InternalDumpData (ServerNonce, SPDM_NONCE_SIZE);
     DEBUG((DEBUG_INFO, "\n"));
     Ptr += SPDM_NONCE_SIZE;
-        
+
     OpaqueLength = *(UINT16 *)Ptr;
     Ptr += sizeof(UINT16);
-        
+
     if (SpdmResponseSize < sizeof(SPDM_MEASUREMENTS_RESPONSE) +
                            MeasurementRecordDataLength +
                            SPDM_NONCE_SIZE +
@@ -266,5 +284,6 @@ SpdmGetMeasurement (
   }
 
   SpdmContext->ErrorState = SPDM_STATUS_SUCCESS;
+  SpdmContext->SpdmCmdReceiveState |= SPDM_GET_MEASUREMENTS_RECEIVE_FLAG;
   return RETURN_SUCCESS;
 }

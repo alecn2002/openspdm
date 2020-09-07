@@ -4,7 +4,7 @@
 
 1) Specification
 
-   DSP0274	Security Protocol and Data Model (SPDM) Specification (version [1.0.0](https://www.dmtf.org/sites/default/files/standards/documents/DSP0274_1.0.0.pdf) and version [1.1.0b](https://www.dmtf.org/sites/default/files/standards/documents/DSP0274_1.1.0b.pdf))
+   DSP0274	Security Protocol and Data Model (SPDM) Specification (version [1.0.0](https://www.dmtf.org/sites/default/files/standards/documents/DSP0274_1.0.0.pdf) and version [1.1.0c](https://www.dmtf.org/sites/default/files/standards/documents/DSP0274_1.1.0.pdf))
 
    DSP0276	Secured MCTP Messages over MCTP Binding Specification (version [1.0.0a](https://www.dmtf.org/sites/default/files/standards/documents/DSP0276_1.0.0a.pdf))
 
@@ -37,57 +37,109 @@
 
    Support to be included in UEFI host environment, such as [SpdmRequester](https://github.com/jyao1/edk2/tree/DeviceSecurity/DeviceSecurityPkg)
 
-## Build
+7) openspdm library design:
 
-1) Download Crypto library :
+   The detailed design can be found at [Design](https://github.com/jyao1/openspdm/blob/master/Doc/Design.md)
 
-   To use MbedTls as Crypto librarym, Please download [mbedtls-2.16.6](https://tls.mbed.org/download/start/mbedtls-2.16.6-apache.tgz) and unzip it.
+## Prerequisit
+
+### Build Tool
+
+1) [Visual Studio](https://visualstudio.microsoft.com/) (VS2015 or VS2019)
+
+2) [GCC](https://gcc.gnu.org/) (above GCC5)
+
+3) [LLVM](https://llvm.org/) (LLVM9)
+
+   Download and install [LLVM9](http://releases.llvm.org/download.html#9.0.0). Ensure LLVM9 executable directory is in PATH environment variable.
+
+### Crypto library
+
+1) [MbedTls](https://tls.mbed.org) as Crypto library
+
+   Please download [mbedtls-2.16.6](https://tls.mbed.org/download/start/mbedtls-2.16.6-apache.tgz) and unzip it.
    Rename mbedtls-2.16.6 to mbedtls and put mbedtls under [MbedTlsLib](https://github.com/jyao1/openspdm/tree/master/OsStub/MbedTlsLib)
 
-   To use Openssl as crypto library, please download [openssl-1.1.1b](https://www.openssl.org/source/openssl-1.1.1b.tar.gz) and unzip it.
-   Rename openssl-1.1.1b to openssl and put openssl under [OpensslLib](https://github.com/jyao1/openspdm/tree/master/OsStub/OpensslLib)
+2) [Openssl](https://www.openssl.org) as crypto library
 
-2) Windows Build:
+   Please download [openssl-1.1.1g](https://www.openssl.org/source/openssl-1.1.1g.tar.gz) and unzip it.
+   Rename openssl-1.1.1g to openssl and put openssl under [OpensslLib](https://github.com/jyao1/openspdm/tree/master/OsStub/OpensslLib)
+
+### Unit Test framework
+
+1) [cmocka](https://cmocka.org/)
+
+   Please download [cmocka-1.1.5](https://cmocka.org/files/1.1/cmocka-1.1.5.tar.xz) and unzip it.
+   Rename cmocka-1.1.5 to cmocka and put cmocka under [CmockaLib](https://github.com/jyao1/openspdm/tree/master/UnitTest/CmockaLib)
+
+## Build
+
+### Windows Build:
+
+1) Use Visual Studio
 
    Tool : Visual Studio 2015 (TOOLCHAIN=VS2015)
 
-   Open command prompt at openspdm dir and type "nmake ARCH=<X64|Ia32> TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>".
+   Open visual studio 2015 command prompt at openspdm dir and type `nmake ARCH=<X64|Ia32> TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>`. (Use x86 command prompt for ARCH=Ia32 and x64 command prompt for ARCH=X64)
 
-3) Linux Build:
+   Tool : Visual Studio 2019 (TOOLCHAIN=VS2019)
+
+   Open visual studio 2019 command prompt at openspdm dir and type `nmake ARCH=<X64|Ia32> TOOLCHAIN=VS2019 TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>`. (Use x86 command prompt for ARCH=Ia32 and x64 command prompt for ARCH=X64)
+
+2) Use LLVM
+
+   Tool : LLVM x86_64-pc-windows-msvc (TOOLCHAIN=CLANG)
+
+   Open visual studio 2019 command prompt at openspdm dir and type `make ARCH=<X64|Ia32> TOOLCHAIN=CLANG TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>`. (Use x86 command prompt for ARCH=Ia32 and x64 command prompt for ARCH=X64)
+
+### Linux Build:
+
+1) Use GCC
 
    Tool : GCC (TOOLCHAIN=GCC)
 
-   Open command prompt at openspdm dir and type "make -f GNUmakefile ARCH=<X64|Ia32> TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>".
+   Open command prompt at openspdm dir and type `make -f GNUmakefile ARCH=<X64|Ia32> TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>`.
 
-   Tool : CLANG (TOOLCHAIN=CLANG)
+2) Use LLVM
 
-   Open command prompt at openspdm dir and type "make -f GNUmakefile ARCH=<X64|Ia32> TOOLCHAIN=CLANG TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>".
+   Tool : LLVM (TOOLCHAIN=CLANG)
 
-4) Run :
-   The output is at openspdm/Build/\<TARGET>_\<TOOLCHAIN>/\<ARCH>.
+   Open command prompt at openspdm dir and type `make -f GNUmakefile ARCH=<X64|Ia32> TOOLCHAIN=CLANG TARGET=<DEBUG|RELEASE> CRYPTO=<MbedTls|Openssl> -e WORKSPACE=<openspdm_root_dir>`.
+
+## Run Test
+
+### Run [OsTest](https://github.com/jyao1/openspdm/tree/master/OsTest)
+
+   The OsTest output is at openspdm/Build/\<TARGET>_\<TOOLCHAIN>/\<ARCH>.
    Open one command prompt at output dir to run SpdmResponderTest and another command prompt to run SpdmRequesterTest.
+
+### Run [UnitTest](https://github.com/jyao1/openspdm/tree/master/UnitTest)
+
+   The UnitTest output is at openspdm/Build/\<TARGET>_\<TOOLCHAIN>/\<ARCH>.
+   Open one command prompt at output dir to run TestSpdmRequester and TestSpdmResponder.
+
+   You may see something like:
+
+   <pre>
+      [==========] Running 2 test(s).
+      [ RUN      ] TestSpdmResponderVersionCase1
+      [       OK ] TestSpdmResponderVersionCase1
+      [ RUN      ] TestSpdmResponderVersionCase2
+      [       OK ] TestSpdmResponderVersionCase2
+      [==========] 2 test(s) run.
+      [  PASSED  ] 2 test(s).
+   </pre>
+
+### Other Test
+
+  openspdm also supports other test such as code coverage, fuzzing, symbolic execution, model checker.
+  Please refer to [Test](https://github.com/jyao1/openspdm/blob/master/Doc/Test.md)
 
 ## Feature not implemented yet
 
-1) Full error handling
+1) Other architectures such as Arm, AArch64, RiscV64, or Arc.
 
-2) SPDM 1.0
-
-   GET_VERSION check
-
-   FLAGS_CACHE_CAP
-
-   multiple cert chains
-
-3) SPDM 1.1
-
-   Timer (for heartbeat ?)
-
-4) Other architectures such as Arm, AArch64, RiscV64, or Arc.
-
-5) Other compilers such as VS2019 or LLVM.
-
-6) Other crypto library.
+2) Please refer to [issues](https://github.com/jyao1/openspdm/issues) for detail
 
 ## Known limitation
 This package is only the sample code to show the concept.

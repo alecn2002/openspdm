@@ -39,6 +39,9 @@ SpdmGetResponseVersion (
     SpdmGenerateErrorResponse (SpdmContext, SPDM_ERROR_CODE_INVALID_REQUEST, 0, ResponseSize, Response);
     return RETURN_SUCCESS;
   }
+  if (SpdmContext->ResponseState != SpdmResponseStateNormal) {
+    return SpdmResponderHandleResponseState(SpdmContext, SpdmRequest->Header.RequestResponseCode, ResponseSize, Response);
+  }
   SpdmRequestSize = RequestSize;
   //
   // Cache
@@ -68,6 +71,10 @@ SpdmGetResponseVersion (
   // Cache
   //
   AppendManagedBuffer (&SpdmContext->Transcript.MessageA, SpdmResponse, *ResponseSize);
+
+  SpdmContext->ConnectionInfo.Version[0] = SPDM_MESSAGE_VERSION_10;
+  SpdmContext->ConnectionInfo.Version[1] = SPDM_MESSAGE_VERSION_11;
+  SpdmContext->SpdmCmdReceiveState |= SPDM_GET_VERSION_RECEIVE_FLAG;
 
   return RETURN_SUCCESS;
 }

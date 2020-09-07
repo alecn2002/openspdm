@@ -31,10 +31,10 @@ SpemRequesterVerifyDigest (
   UINT8                                     *CertBuffer;
   UINTN                                     CertBufferSize;
   
-  CertBuffer = SpdmContext->LocalContext.SpdmCertChainVarBuffer;
-  CertBufferSize = SpdmContext->LocalContext.SpdmCertChainVarBufferSize;
+  CertBuffer = SpdmContext->LocalContext.PeerCertChainVarBuffer;
+  CertBufferSize = SpdmContext->LocalContext.PeerCertChainVarBufferSize;
   if ((CertBuffer == NULL) || (CertBufferSize == 0)) {
-    return FALSE;
+    return TRUE;
   }
   
   HashFunc = GetSpdmHashFunc (SpdmContext);
@@ -77,14 +77,21 @@ SpdmGetDigest (
   SPDM_DEVICE_CONTEXT                       *SpdmContext;
 
   SpdmContext = Context;
-  
+  if (((SpdmContext->SpdmCmdReceiveState & SPDM_NEGOTIATE_ALGORITHMS_RECEIVE_FLAG) == 0) ||
+      ((SpdmContext->SpdmCmdReceiveState & SPDM_GET_CAPABILITIES_RECEIVE_FLAG) == 0)) {
+    return RETURN_DEVICE_ERROR;
+  }
   if ((SpdmContext->ConnectionInfo.Capability.Flags & SPDM_GET_CAPABILITIES_RESPONSE_FLAGS_CERT_CAP) == 0) {
     return RETURN_DEVICE_ERROR;
   }
   
   SpdmContext->ErrorState = SPDM_STATUS_ERROR_DEVICE_NO_CAPABILITIES;
  
-  SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  if (SpdmIsVersionSupported (SpdmContext, SPDM_MESSAGE_VERSION_11)) {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_11;
+  } else {
+    SpdmRequest.Header.SPDMVersion = SPDM_MESSAGE_VERSION_10;
+  }
   SpdmRequest.Header.RequestResponseCode = SPDM_GET_DIGESTS;
   SpdmRequest.Header.Param1 = 0;
   SpdmRequest.Header.Param2 = 0;
@@ -149,6 +156,6 @@ SpdmGetDigest (
   if (TotalDigestBuffer != NULL) {
     CopyMem (TotalDigestBuffer, SpdmResponse.Digest, DigestSize * DigestCount);
   }
-
+  SpdmContext->SpdmCmdReceiveState |= SPDM_GET_DIGESTS_RECEIVE_FLAG;
   return RETURN_SUCCESS;
 }

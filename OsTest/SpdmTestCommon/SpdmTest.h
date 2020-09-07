@@ -19,7 +19,6 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include "assert.h"
 #include "SpdmTestCommand.h"
 
-#define USE_PSK 0
 //#define USE_ASYM_ALGO  SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_RSASSA_2048
 #define USE_ASYM_ALGO  SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256
 #define USE_HASH_ALGO  SPDM_ALGORITHMS_BASE_HASH_ALGO_TPM_ALG_SHA_256
@@ -27,6 +26,11 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #define USE_DHE_ALGO   SPDM_ALGORITHMS_DHE_NAMED_GROUP_SECP_256_R1
 #define USE_AEAD_ALGO  SPDM_ALGORITHMS_AEAD_CIPHER_SUITE_AES_256_GCM
 //#define USE_AEAD_ALGO  SPDM_ALGORITHMS_AEAD_CIPHER_SUITE_CHACHA20_POLY1305
+//#define USE_REQ_ASYM_ALGO  SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_RSASSA_2048
+#define USE_REQ_ASYM_ALGO  SPDM_ALGORITHMS_BASE_ASYM_ALGO_TPM_ALG_ECDSA_ECC_NIST_P256
+
+#define DEFAULT_OPAQUE_LENGTH             16
+#define DEFAULT_OPAQUE_DATA               0xCC
 
 VOID
 DumpData (
@@ -38,6 +42,7 @@ BOOLEAN
 SendPlatformData (
   IN SOCKET           Socket,
   IN UINT32           Command,
+  IN UINT32           Session,
   IN UINT8            *SendBuffer,
   IN UINTN            BytesToSend
   );
@@ -46,6 +51,7 @@ BOOLEAN
 ReceivePlatformData (
   IN  SOCKET           Socket,
   OUT UINT32           *Command,
+  OUT UINT32           *Session,
   OUT UINT8            *ReceiveBuffer,
   IN OUT UINTN         *BytesToReceive
   );
@@ -79,13 +85,29 @@ ReadRequesterPrivateCertificate (
 BOOLEAN
 ReadResponderPublicCertificateChain (
   OUT VOID    **Data,
-  OUT UINTN   *Size
+  OUT UINTN   *Size,
+  OUT VOID    **Hash,
+  OUT UINTN   *HashSize
   );
 
 BOOLEAN
 ReadRequesterPublicCertificateChain (
   OUT VOID    **Data,
-  OUT UINTN   *Size
+  OUT UINTN   *Size,
+  OUT VOID    **Hash,
+  OUT UINTN   *HashSize
+  );
+
+BOOLEAN
+EFIAPI
+SpdmDataSignFunc (
+  IN      VOID         *SpdmContext,
+  IN      BOOLEAN      IsResponder,
+  IN      UINT32       AsymAlgo,
+  IN      CONST UINT8  *MessageHash,
+  IN      UINTN        HashSize,
+  OUT     UINT8        *Signature,
+  IN OUT  UINTN        *SigSize
   );
 
 #endif

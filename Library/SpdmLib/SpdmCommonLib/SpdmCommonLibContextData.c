@@ -12,7 +12,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 VOID
 SpdmSessionInfoInit (
   IN     SPDM_SESSION_INFO       *SessionInfo,
-  IN     UINT8                   SessionId
+  IN     UINT32                  SessionId
   )
 {
   ZeroMem (SessionInfo, sizeof(*SessionInfo));
@@ -26,7 +26,7 @@ SpdmSessionInfoInit (
 SPDM_SESSION_INFO *
 SpdmGetSessionInfoViaSessionId (
   IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-  IN     UINT8                     SessionId
+  IN     UINT32                    SessionId
   )
 {
   SPDM_SESSION_INFO          *SessionInfo;
@@ -53,7 +53,7 @@ SpdmGetSessionInfoViaSessionId (
 SPDM_SESSION_INFO *
 SpdmAssignSessionId (
   IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-  IN     UINT8                     SessionId
+  IN     UINT32                    SessionId
   )
 {
   SPDM_SESSION_INFO          *SessionInfo;
@@ -87,33 +87,54 @@ SpdmAssignSessionId (
   return NULL;
 }
 
-SPDM_SESSION_INFO *
-SpdmAllocateSessionId (
-  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-     OUT UINT8                     *SessionId
+UINT16
+SpdmAllocateReqSessionId (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext
   )
 {
+  UINT16                     ReqSessionId;
   SPDM_SESSION_INFO          *SessionInfo;
   UINTN                      Index;
 
   SessionInfo = SpdmContext->SessionInfo;
   for (Index = 0; Index < MAX_SPDM_SESSION_COUNT; Index++) {
-    if (SessionInfo[Index].SessionId == INVALID_SESSION_ID) {
-      *SessionId = (UINT8)(0xFF - Index);
-      SpdmSessionInfoInit (&SessionInfo[Index], *SessionId);
-      return &SessionInfo[Index];
+    if ((SessionInfo[Index].SessionId & 0xFFFF0000) == (INVALID_SESSION_ID & 0xFFFF0000)) {
+      ReqSessionId = (UINT16)(0xFFFF - Index);
+      return ReqSessionId;
     }
   }
 
-  DEBUG ((DEBUG_ERROR, "SpdmAllocateSessionId - MAX SessionId\n"));
+  DEBUG ((DEBUG_ERROR, "SpdmAllocateReqSessionId - MAX SessionId\n"));
   ASSERT(FALSE);
-  return NULL;
+  return (INVALID_SESSION_ID & 0xFFFF0000) >> 16;
+}
+
+UINT16
+SpdmAllocateRspSessionId (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext
+  )
+{
+  UINT16                     RspSessionId;
+  SPDM_SESSION_INFO          *SessionInfo;
+  UINTN                      Index;
+
+  SessionInfo = SpdmContext->SessionInfo;
+  for (Index = 0; Index < MAX_SPDM_SESSION_COUNT; Index++) {
+    if ((SessionInfo[Index].SessionId & 0xFFFF) == (INVALID_SESSION_ID & 0xFFFF)) {
+      RspSessionId = (UINT16)(0xFFFF - Index);
+      return RspSessionId;
+    }
+  }
+
+  DEBUG ((DEBUG_ERROR, "SpdmAllocateRspSessionId - MAX SessionId\n"));
+  ASSERT(FALSE);
+  return (INVALID_SESSION_ID & 0xFFFF);
 }
 
 SPDM_SESSION_INFO *
 SpdmFreeSessionId (
   IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
-  IN     UINT8                     SessionId
+  IN     UINT32                    SessionId
   )
 {
   SPDM_SESSION_INFO          *SessionInfo;
@@ -196,18 +217,6 @@ SpdmSetData (
   SpdmContext = Context;
 
   switch (DataType) {
-  case SpdmDataIoSizeAlignment:
-    if (DataSize != sizeof(UINT32)) {
-      return RETURN_INVALID_PARAMETER;
-    }
-    SpdmContext->Alignment = *(UINT32 *)Data;
-    break;
-  case SpdmDataIoSecureMessageType:
-    if (DataSize != sizeof(SPDM_IO_SECURE_MESSAGING_TYPE)) {
-      return RETURN_INVALID_PARAMETER;
-    }
-    SpdmContext->SecureMessageType = *(SPDM_IO_SECURE_MESSAGING_TYPE *)Data;
-    break;
   case SpdmDataCapabilityFlags:
     if (DataSize != sizeof(UINT32)) {
       return RETURN_INVALID_PARAMETER;
@@ -250,15 +259,25 @@ SpdmSetData (
     }
     SpdmContext->LocalContext.Algorithm.AEADCipherSuite = *(UINT16 *)Data;
     break;
+  case SpdmDataReqBaseAsymAlg:
+    if (DataSize != sizeof(UINT16)) {
+      return RETURN_INVALID_PARAMETER;
+    }
+    SpdmContext->LocalContext.Algorithm.ReqBaseAsymAlg = *(UINT16 *)Data;
+    break;
   case SpdmDataKeySchedule:
     if (DataSize != sizeof(UINT16)) {
       return RETURN_INVALID_PARAMETER;
     }
     SpdmContext->LocalContext.Algorithm.KeySchedule = *(UINT16 *)Data;
     break;
+  case SpdmDataPeerPublicRootCertHash:
+    SpdmContext->LocalContext.PeerRootCertHashVarBufferSize = DataSize;
+    SpdmContext->LocalContext.PeerRootCertHashVarBuffer = Data;
+    break;
   case SpdmDataPeerPublicCertChains:
-    SpdmContext->LocalContext.SpdmCertChainVarBufferSize = DataSize;
-    SpdmContext->LocalContext.SpdmCertChainVarBuffer = Data;
+    SpdmContext->LocalContext.PeerCertChainVarBufferSize = DataSize;
+    SpdmContext->LocalContext.PeerCertChainVarBuffer = Data;
     break;
   case SpdmDataSlotCount:
     if (DataSize != sizeof(UINT8)) {
@@ -278,10 +297,6 @@ SpdmSetData (
     SpdmContext->LocalContext.CertificateChainSize[SlotNum] = DataSize;
     SpdmContext->LocalContext.CertificateChain[SlotNum] = Data;
     break;
-  case SpdmDataPrivateCertificate:
-    SpdmContext->LocalContext.PrivatePemSize = DataSize;
-    SpdmContext->LocalContext.PrivatePem = Data;
-    break;
   case SpdmDataMeasurementRecord:
     SpdmContext->LocalContext.DeviceMeasurementCount = Parameter->AdditionalData[0];
     SpdmContext->LocalContext.DeviceMeasurement = Data;
@@ -295,6 +310,13 @@ SpdmSetData (
   case SpdmDataPsk:
     SpdmContext->LocalContext.PskSize = DataSize;
     SpdmContext->LocalContext.Psk = Data;
+    break;
+  case SpdmDataPskHint:
+    if (DataSize > MAX_SPDM_PSK_HINT_LENGTH) {
+      return RETURN_INVALID_PARAMETER;
+    }
+    SpdmContext->LocalContext.PskHintSize = DataSize;
+    SpdmContext->LocalContext.PskHint = Data;
     break;
   default:
     return RETURN_UNSUPPORTED;
@@ -335,7 +357,7 @@ SpdmGetData (
   SPDM_DEVICE_CONTEXT        *SpdmContext;
   UINTN                      TargetDataSize;
   VOID                       *TargetData;
-  UINT8                      SessionId;
+  UINT32                     SessionId;
   SPDM_SESSION_INFO          *SessionInfo;
 
   SpdmContext = Context;
@@ -344,7 +366,7 @@ SpdmGetData (
     if (Parameter->Location != SpdmDataLocationSession) {
       return RETURN_INVALID_PARAMETER;
     }
-    SessionId = Parameter->AdditionalData[0];
+    SessionId = *(UINT32 *)Parameter->AdditionalData;
     SessionInfo = SpdmGetSessionInfoViaSessionId (SpdmContext, SessionId);
     if (SessionInfo == NULL) {
       return RETURN_INVALID_PARAMETER;
@@ -447,6 +469,52 @@ SpdmGetData (
   return RETURN_SUCCESS;
 }
 
+BOOLEAN
+SpdmIsVersionSupported (
+  IN     SPDM_DEVICE_CONTEXT       *SpdmContext,
+  IN     UINT8                     Version
+  )
+{
+  UINTN  Index;
+
+  for (Index = 0; Index < MAX_SPDM_VERSION_COUNT; Index++) {
+    if (Version == SpdmContext->ConnectionInfo.Version[Index]) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+RETURN_STATUS
+EFIAPI
+SpdmRegisterDataSignFunc (
+  IN     VOID                      *Context,
+  IN     SPDM_DATA_SIGN_FUNC       SpdmDataSignFunc
+  )
+{
+  SPDM_DEVICE_CONTEXT       *SpdmContext;
+
+  SpdmContext = Context;
+  SpdmContext->LocalContext.SpdmDataSignFunc = SpdmDataSignFunc;
+  return RETURN_SUCCESS;
+}
+
+RETURN_STATUS
+EFIAPI
+SpdmRegisterDeviceIoFunc (
+  IN     VOID                              *Context,
+  IN     SPDM_DEVICE_SEND_MESSAGE_FUNC     SendMessage,
+  IN     SPDM_DEVICE_RECEIVE_MESSAGE_FUNC  ReceiveMessage
+  )
+{
+  SPDM_DEVICE_CONTEXT       *SpdmContext;
+
+  SpdmContext = Context;
+  SpdmContext->SendMessage = SendMessage;
+  SpdmContext->ReceiveMessage = ReceiveMessage;
+  return RETURN_SUCCESS;
+}
+
 UINT32
 EFIAPI
 SpdmGetLastError (
@@ -461,6 +529,57 @@ SpdmGetLastError (
 
 RETURN_STATUS
 EFIAPI
+SpdmSetAlignment (
+  IN     VOID                      *Context,
+  IN     UINT32                    Alignment
+  )
+{
+  SPDM_DEVICE_CONTEXT       *SpdmContext;
+
+  SpdmContext = Context;
+  SpdmContext->Alignment = Alignment;
+  return RETURN_SUCCESS;
+}
+
+UINT32
+EFIAPI
+SpdmGetAlignment (
+  IN     VOID                      *Context
+  )
+{
+  SPDM_DEVICE_CONTEXT       *SpdmContext;
+
+  SpdmContext = Context;
+  if (SpdmContext->Alignment == 0) {
+    SpdmContext->Alignment = 1;
+  }
+  return SpdmContext->Alignment;
+}
+
+SPDM_SESSION_TYPE
+EFIAPI
+SpdmGetSessionType (
+  IN     VOID                      *Context
+  )
+{
+  SPDM_DEVICE_CONTEXT       *SpdmContext;
+
+  SpdmContext = Context;
+  switch (SpdmContext->ConnectionInfo.Capability.Flags &
+          (SPDM_GET_CAPABILITIES_REQUEST_FLAGS_ENCRYPT_CAP | SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MAC_CAP)) {
+  case 0:
+    return SpdmSessionTypeNone;
+  case (SPDM_GET_CAPABILITIES_REQUEST_FLAGS_ENCRYPT_CAP | SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MAC_CAP) :
+    return SpdmSessionTypeEncMac;
+  case SPDM_GET_CAPABILITIES_REQUEST_FLAGS_MAC_CAP :
+    return SpdmSessionTypeMacOnly;
+  default:
+    return SpdmSessionTypeMax;
+  }
+}
+
+RETURN_STATUS
+EFIAPI
 SpdmInitContext (
   IN     VOID                      *Context
   )
@@ -470,11 +589,15 @@ SpdmInitContext (
   SpdmContext = Context;
   ZeroMem (SpdmContext, sizeof(SPDM_DEVICE_CONTEXT));
   SpdmContext->Version = SPDM_DEVICE_CONTEXT_VERSION;
+  SpdmContext->Alignment = 1;
   SpdmContext->Transcript.MessageA.MaxBufferSize  = MAX_SPDM_MESSAGE_SMALL_BUFFER_SIZE;
   SpdmContext->Transcript.MessageB.MaxBufferSize  = MAX_SPDM_MESSAGE_BUFFER_SIZE;
   SpdmContext->Transcript.MessageC.MaxBufferSize  = MAX_SPDM_MESSAGE_SMALL_BUFFER_SIZE;
   SpdmContext->Transcript.M1M2.MaxBufferSize      = MAX_SPDM_MESSAGE_BUFFER_SIZE;
   SpdmContext->Transcript.L1L2.MaxBufferSize      = MAX_SPDM_MESSAGE_SMALL_BUFFER_SIZE;
+  SpdmContext->RetryTimes                         = MAX_SPDM_REQUEST_RETRY_TIMES;
+  SpdmContext->ResponseState                      = SpdmResponseStateNormal;
+  SpdmContext->CurrentToken                       = 0;
 
   RandomSeed (NULL, 0);
   return RETURN_SUCCESS;
